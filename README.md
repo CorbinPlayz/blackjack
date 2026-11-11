@@ -22,7 +22,7 @@ Live site: https://corbinplayz.github.io/blackjack/
 2. GitHub repo → Settings → Secrets and variables → Actions → add `CLOUDFLARE_API_TOKEN` and `CLOUDFLARE_ACCOUNT_ID`.
 3. Actions tab → run **Deploy online-table Worker**. Its log prints the worker URL
    (`https://blackjack-table.<your-subdomain>.workers.dev`).
-4. In `index.html` set `var ONLINE_URL = 'https://blackjack-table.<your-subdomain>.workers.dev';` and commit.
+4. (Done for this repo.) `index.html` points at `https://blackjack-table.camc-cf76.workers.dev`.
 
 Until step 4 the app is fully offline and the online buttons just say it isn't set up.
 Tables expire after 24 hours idle. Only the host's secret token can change a table.
