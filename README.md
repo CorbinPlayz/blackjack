@@ -17,12 +17,15 @@ Live site: https://corbinplayz.github.io/blackjack/
 - `worker/` — tiny Cloudflare Worker + Durable Object that relays the table state.
 - Site is served by GitHub Pages straight from `main` (Settings → Pages → Deploy from a branch → `main` / root).
 
-## Turn on the online table (one-time)
-1. Cloudflare dashboard → create an **API token** (template: "Edit Cloudflare Workers") and note your **Account ID**.
-2. GitHub repo → Settings → Secrets and variables → Actions → add `CLOUDFLARE_API_TOKEN` and `CLOUDFLARE_ACCOUNT_ID`.
-3. Actions tab → run **Deploy online-table Worker**. Its log prints the worker URL
-   (`https://blackjack-table.<your-subdomain>.workers.dev`).
-4. (Done for this repo.) `index.html` points at `https://blackjack-table.camc-cf76.workers.dev`.
+## Access control (invite-only)
+When the online service is configured, the app is invite-only:
+- A new device sees only a "Request access" screen (enter your name). The host approves or blocks from the **Admin** panel at the bottom of the app.
+- Approved devices open the app automatically and keep working offline. Blocked devices are locked out within about 15 seconds and the server refuses them.
+- Admin = whoever knows the `ADMIN_KEY` secret. Sign in with it from the gate screen ("Admin sign-in") or the Admin panel.
+- Note: the page's code is public on GitHub Pages, so the lock protects the online tables and the saved-approval flow, not the HTML file itself.
 
-Until step 4 the app is fully offline and the online buttons just say it isn't set up.
-Tables expire after 24 hours idle. Only the host's secret token can change a table.
+## Online service
+`worker/` is deployed as the Cloudflare Worker `blackjack-table` (Durable Objects `Room` + `Registry`).
+Set or change the admin key with `npx wrangler secret put ADMIN_KEY` (or the Cloudflare dashboard). The key is never stored in git.
+`index.html` points at `https://blackjack-table.camc-cf76.workers.dev` via `ONLINE_URL`; set it to `''` for a fully offline copy.
+Tables expire after 24 hours idle; only the host's secret token can change a table.

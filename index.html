@@ -34,12 +34,12 @@
   .panel h2 { font-size: 13px; text-transform: uppercase; letter-spacing: 1px; color: var(--muted); margin: 0 0 10px; font-weight: 600; }
   .row { display: flex; gap: 10px; }
   .row > * { min-width: 0; }
-  input[type="text"] {
+  input[type="text"], input[type="password"] {
     width: 100%; background: var(--bg); color: var(--text); border: 1px solid var(--line);
     border-radius: 12px; padding: 14px 12px; font-size: 16px; /* 16px prevents iOS zoom */
     outline: none; -webkit-appearance: none; appearance: none;
   }
-  input[type="text"]:focus { border-color: var(--green); }
+  input[type="text"]:focus, input[type="password"]:focus { border-color: var(--green); }
   input::placeholder { color: #55645b; }
   button {
     font: inherit; font-weight: 700; border: 0; border-radius: 12px; padding: 14px 12px;
@@ -83,6 +83,12 @@
   .result.neg { color: var(--red); }
   .result.neu { color: var(--muted); }
 
+  .adm-group { font-size: 12px; text-transform: uppercase; letter-spacing: .8px; color: var(--muted); margin: 12px 0 4px; }
+  .adm-row { display: flex; align-items: center; justify-content: space-between; gap: 8px; padding: 8px 0; border-top: 1px solid var(--line); }
+  .adm-row .nm { min-width: 0; word-break: break-word; font-weight: 600; }
+  .adm-row .btns { display: flex; gap: 6px; flex: none; }
+  .adm-row button { min-height: 40px; padding: 6px 12px; font-size: 14px; }
+  .adm-block { background: var(--red); color: #fff; }
   .hist-row { display: flex; justify-content: space-between; gap: 10px; padding: 9px 0; border-top: 1px solid var(--line); font-size: 15px; }
   .hist-row:first-of-type { border-top: 0; }
   .hist-row .who { min-width: 0; word-break: break-word; }
@@ -94,6 +100,27 @@
 <body>
 
 <h1>♠ Blackjack <span>Chip Tracker</span></h1>
+
+<!-- ACCESS GATE (only used when the online service is configured) -->
+<div class="panel" id="gatePanel" hidden>
+  <h2>Private table</h2>
+  <div class="online-status" id="gateChecking">Checking access…</div>
+  <div id="gateRequest" hidden>
+    <div class="online-status">This app is invite-only. Enter your name and the host will approve you.</div>
+    <input type="text" id="gateName" placeholder="Your name" autocomplete="off" autocapitalize="words" maxlength="30">
+    <button type="button" class="btn-add" id="gateBtn">Request access</button>
+  </div>
+  <div class="online-status" id="gatePending" hidden>Request sent. Waiting for the host to approve you. This page updates by itself.</div>
+  <div class="online-status" id="gateBlocked" hidden style="color:var(--red)">Access denied. Ask the host if you think this is a mistake.</div>
+  <div class="msg" id="gateMsg" role="status"></div>
+  <button type="button" class="btn-ghost" id="gateAdminToggle" style="width:100%;margin-top:6px">Admin sign-in</button>
+  <div id="gateAdmin" hidden style="margin-top:10px">
+    <input type="password" id="gateAdminKey" placeholder="Admin key" autocomplete="off">
+    <button type="button" class="btn-add" id="gateAdminBtn">Sign in as admin</button>
+  </div>
+</div>
+
+<div id="appRoot" hidden>
 
 <!-- ONLINE TABLE -->
 <div class="panel" id="onlinePanel">
@@ -138,6 +165,19 @@
   <h2>Recent hands</h2>
   <div id="history"></div>
 </div>
+
+<button type="button" class="btn-ghost" id="adminBtn" style="width:100%" hidden>Admin</button>
+<div class="panel" id="adminPanel" hidden style="margin-top:14px">
+  <h2>Admin · who can use this app</h2>
+  <div id="adminKeyBox" hidden>
+    <input type="password" id="adminKeyInput" placeholder="Admin key" autocomplete="off">
+    <button type="button" class="btn-add" id="adminKeyBtn">Unlock admin</button>
+  </div>
+  <div id="adminList"></div>
+  <div class="msg" id="adminMsg" role="status"></div>
+</div>
+
+</div><!-- /appRoot -->
 
 <script>
 /* ============ CORE LOGIC (no DOM) — amounts are integer cents ============ */
@@ -287,6 +327,36 @@ var Core = (function () {
 (function () {
   /* Address of the deployed online-table service (see README). Leave '' to keep the app offline-only. */
   var ONLINE_URL = 'https://blackjack-table.camc-cf76.workers.dev';
+
+  /* ---------- device identity + server calls ---------- */
+  var DEVICE_KEY = 'bjDevice.v1', ACCESS_KEY = 'bjAccess.v1', ADMIN_STORE = 'bjAdminKey.v1';
+  var deviceMem = null;
+  function lsGet(k) { try { return localStorage.getItem(k); } catch (e) { return null; } }
+  function lsSet(k, v) { try { localStorage.setItem(k, v); } catch (e) {} }
+  function lsDel(k) { try { localStorage.removeItem(k); } catch (e) {} }
+  function getDevice() {
+    if (deviceMem) return deviceMem;
+    var d = lsGet(DEVICE_KEY);
+    if (!d || !/^[A-Za-z0-9]{32}$/.test(d)) {
+      var chars = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789', out = '';
+      var arr = new Uint8Array(32);
+      if (typeof crypto !== 'undefined' && crypto.getRandomValues) crypto.getRandomValues(arr);
+      else for (var i = 0; i < 32; i++) arr[i] = Math.floor(Math.random() * 256);
+      for (var j = 0; j < 32; j++) out += chars[arr[j] % chars.length];
+      d = out; lsSet(DEVICE_KEY, d);
+    }
+    deviceMem = d;
+    return d;
+  }
+  function api(path, opts) {
+    opts = opts || {};
+    var h = {}; var k;
+    for (k in (opts.headers || {})) h[k] = opts.headers[k];
+    h['X-Device-Id'] = getDevice();
+    var o = {}; for (k in opts) o[k] = opts[k];
+    o.headers = h;
+    return fetch(ONLINE_URL + path, o);
+  }
 
   var $ = function (id) { return document.getElementById(id); };
   var nameEl = $('newName'), startEl = $('newStart'), addMsg = $('addMsg');
@@ -518,7 +588,8 @@ var Core = (function () {
     if (needUrl()) return;
     setOnlineMsg('Creating table…', true);
     try {
-      var r = await fetch(ONLINE_URL + '/api/rooms', { method: 'POST' });
+      var r = await api('/api/rooms', { method: 'POST' });
+      if (r.status === 403) { accessLost(); return; }
       if (!r.ok) throw new Error('status ' + r.status);
       var d = await r.json();
       online = { role: 'host', code: d.code, token: d.token };
@@ -542,11 +613,12 @@ var Core = (function () {
     while (dirty && online.role === 'host') {
       dirty = false;
       try {
-        var r = await fetch(ONLINE_URL + '/api/rooms/' + online.code, {
+        var r = await api('/api/rooms/' + online.code, {
           method: 'PUT',
           headers: { 'Authorization': 'Bearer ' + online.token, 'Content-Type': 'application/json' },
           body: JSON.stringify({ state: Core.state })
         });
+        if (r.status === 403) { pushing = false; accessLost(); return; }
         if (r.status === 401 || r.status === 404) { pushing = false; clearOnline('That table expired. Host a new one.'); return; }
         if (!r.ok) throw new Error('status ' + r.status);
         setOnlineState('Live · players can see updates');
@@ -565,7 +637,8 @@ var Core = (function () {
     if (polling || online.role !== 'viewer') return;
     polling = true;
     try {
-      var r = await fetch(ONLINE_URL + '/api/rooms/' + online.code, { cache: 'no-store' });
+      var r = await api('/api/rooms/' + online.code, { cache: 'no-store' });
+      if (r.status === 403) { polling = false; accessLost(); return; }
       if (r.status === 404) { polling = false; clearOnline('That table has closed.'); return; }
       if (!r.ok) throw new Error('status ' + r.status);
       var d = await r.json();
@@ -593,7 +666,8 @@ var Core = (function () {
     if (!/^[A-Z0-9]{4,6}$/.test(code)) { setOnlineMsg('Enter the table code from the dealer.', false); return; }
     setOnlineMsg('Joining…', true);
     try {
-      var r = await fetch(ONLINE_URL + '/api/rooms/' + code, { cache: 'no-store' });
+      var r = await api('/api/rooms/' + code, { cache: 'no-store' });
+      if (r.status === 403) { accessLost(); return; }
       if (r.status === 404) { setOnlineMsg('No table with that code.', false); return; }
       if (!r.ok) throw new Error('status ' + r.status);
       online = { role: 'viewer', code: code, token: null };
@@ -615,15 +689,204 @@ var Core = (function () {
     clearOnline('');
   });
 
+  /* ============ ACCESS GATE + ADMIN ============
+     When the online service is configured, only devices the admin has approved can use the app.
+     Approval is checked by the server; an approved device keeps working offline from a saved flag. */
+  var access = 'checking';        // checking | none | pending | approved | blocked
+  var started = false, gateTimer = null, adminTimer = null, accessTimer = null;
+
+  function gateMsg(t) { $('gateMsg').textContent = t || ''; }
+  function adminKeyVal() { return lsGet(ADMIN_STORE) || ''; }
+
+  function renderGate() {
+    $('appRoot').hidden = true;
+    $('gatePanel').hidden = false;
+    $('gateChecking').hidden = access !== 'checking';
+    $('gateRequest').hidden = access !== 'none';
+    $('gatePending').hidden = access !== 'pending';
+    $('gateBlocked').hidden = access !== 'blocked';
+  }
+
+  function lockApp() {
+    started = false;
+    if (adminTimer) { clearInterval(adminTimer); adminTimer = null; }
+    if (accessTimer) { clearInterval(accessTimer); accessTimer = null; }
+    clearOnline('');
+    $('adminPanel').hidden = true;
+  }
+
+  function accessLost() { checkAccess(); }
+
+  function applyAccess(s) {
+    access = s;
+    if (s === 'approved') {
+      lsSet(ACCESS_KEY, 'approved');
+      if (gateTimer) { clearInterval(gateTimer); gateTimer = null; }
+      gateMsg('');
+      $('gatePanel').hidden = true;
+      startApp();
+      return;
+    }
+    lsDel(ACCESS_KEY);
+    if (started) lockApp();
+    renderGate();
+    if (s === 'pending' && !gateTimer) gateTimer = setInterval(checkAccess, 4000);
+    if (s !== 'pending' && gateTimer) { clearInterval(gateTimer); gateTimer = null; }
+  }
+
+  async function checkAccess() {
+    try {
+      var r = await api('/api/access/status');
+      if (!r.ok) throw new Error('status ' + r.status);
+      var d = await r.json();
+      applyAccess(d.status === 'approved' || d.status === 'pending' || d.status === 'blocked' ? d.status : 'none');
+    } catch (e) {
+      if (access === 'checking') { access = 'none'; renderGate(); gateMsg('Could not reach the server. Check your connection.'); }
+    }
+  }
+
+  async function requestAccess() {
+    var name = $('gateName').value.trim();
+    if (!name) { gateMsg('Enter your name.'); return; }
+    gateMsg('');
+    try {
+      var r = await api('/api/access/request', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ name: name, deviceId: getDevice() })
+      });
+      if (r.status === 429) { gateMsg('Too many people are waiting. Ask the host.'); return; }
+      if (!r.ok) throw new Error('status ' + r.status);
+      var d = await r.json();
+      $('gateName').value = '';               // cleared only after the request went through
+      applyAccess(d.status);
+    } catch (e) {
+      gateMsg('Could not send the request. Check your connection and try again.');
+    }
+  }
+
+  async function adminSignIn() {
+    var key = $('gateAdminKey').value.trim();
+    if (!key) { gateMsg('Enter the admin key.'); return; }
+    try {
+      var r = await api('/api/admin/self', {
+        method: 'POST', headers: { 'X-Admin-Key': key, 'Content-Type': 'application/json' },
+        body: JSON.stringify({ deviceId: getDevice() })
+      });
+      if (r.status === 401) { gateMsg('Wrong admin key.'); return; }
+      if (!r.ok) throw new Error('status ' + r.status);
+      lsSet(ADMIN_STORE, key);
+      $('gateAdminKey').value = ''; $('gateAdmin').hidden = true;
+      applyAccess('approved');
+    } catch (e) {
+      gateMsg('Could not reach the server. Check your connection.');
+    }
+  }
+
+  function adminMsg(t) { $('adminMsg').textContent = t || ''; }
+
+  function adminRow(d) {
+    var row = el('div', 'adm-row');
+    row.appendChild(el('div', 'nm', d.name));
+    var btns = el('div', 'btns');
+    [['approve', 'Approve', ''], ['block', 'Block', 'adm-block'], ['remove', 'Remove', 'btn-ghost']].forEach(function (a) {
+      if ((a[0] === 'approve' && d.status === 'approved') || (a[0] === 'block' && d.status === 'blocked')) return;
+      var b = el('button', a[2], a[1]); b.type = 'button';
+      b.setAttribute('data-act', a[0]); b.setAttribute('data-ref', d.ref);
+      btns.appendChild(b);
+    });
+    row.appendChild(btns);
+    return row;
+  }
+
+  async function adminLoad() {
+    var key = adminKeyVal();
+    if (!key) { $('adminKeyBox').hidden = false; $('adminList').innerHTML = ''; return; }
+    try {
+      var r = await api('/api/admin/devices', { headers: { 'X-Admin-Key': key } });
+      if (r.status === 401) { lsDel(ADMIN_STORE); $('adminKeyBox').hidden = false; adminMsg('That admin key is no longer valid.'); return; }
+      if (!r.ok) throw new Error('status ' + r.status);
+      var devices = (await r.json()).devices || [];
+      var waiting = devices.filter(function (d) { return d.status === 'pending'; }).length;
+      $('adminBtn').textContent = waiting ? 'Admin (' + waiting + ' waiting)' : 'Admin';
+      $('adminKeyBox').hidden = true;
+      if (!adminTimer) adminTimer = setInterval(adminLoad, 10000);   // keeps the "waiting" count fresh
+      var list = $('adminList'); list.innerHTML = '';
+      [['pending', 'Waiting for approval'], ['approved', 'Allowed'], ['blocked', 'Blocked']].forEach(function (g) {
+        var items = devices.filter(function (d) { return d.status === g[0]; });
+        if (!items.length) return;
+        list.appendChild(el('div', 'adm-group', g[1] + ' (' + items.length + ')'));
+        items.forEach(function (d) { list.appendChild(adminRow(d)); });
+      });
+      if (!devices.length) list.appendChild(el('div', 'empty', 'Nobody has asked for access yet.'));
+      adminMsg('');
+    } catch (e) {
+      adminMsg('Could not reach the server.');
+    }
+  }
+
+  async function adminAct(ref, act) {
+    try {
+      var r = await api('/api/admin/devices/' + ref, {
+        method: 'POST', headers: { 'X-Admin-Key': adminKeyVal(), 'Content-Type': 'application/json' },
+        body: JSON.stringify({ action: act })
+      });
+      if (!r.ok) throw new Error('status ' + r.status);
+    } catch (e) { adminMsg('That did not go through. Try again.'); return; }
+    adminLoad();
+  }
+
+  $('gateBtn').addEventListener('click', function (e) { e.preventDefault(); requestAccess(); });
+  $('gateName').addEventListener('keydown', function (ev) { if (ev.key === 'Enter') { ev.preventDefault(); requestAccess(); } });
+  $('gateAdminToggle').addEventListener('click', function (e) { e.preventDefault(); $('gateAdmin').hidden = !$('gateAdmin').hidden; });
+  $('gateAdminBtn').addEventListener('click', function (e) { e.preventDefault(); adminSignIn(); });
+  $('gateAdminKey').addEventListener('keydown', function (ev) { if (ev.key === 'Enter') { ev.preventDefault(); adminSignIn(); } });
+  $('adminBtn').addEventListener('click', function (e) {
+    e.preventDefault();
+    var open = $('adminPanel').hidden;
+    $('adminPanel').hidden = !open;
+    if (open) adminLoad();
+  });
+  function unlockAdmin() {
+    var k = $('adminKeyInput').value.trim();
+    if (!k) return;
+    lsSet(ADMIN_STORE, k); $('adminKeyInput').value = '';
+    adminLoad();
+  }
+  $('adminKeyBtn').addEventListener('click', function (e) { e.preventDefault(); unlockAdmin(); });
+  $('adminKeyInput').addEventListener('keydown', function (ev) { if (ev.key === 'Enter') { ev.preventDefault(); unlockAdmin(); } });
+  $('adminList').addEventListener('click', function (e) {
+    var b = e.target.closest ? e.target.closest('button[data-act]') : null;
+    if (!b) return;
+    e.preventDefault();
+    var act = b.getAttribute('data-act');
+    if (act === 'remove' && !window.confirm('Remove this person? They can ask for access again.')) return;
+    adminAct(b.getAttribute('data-ref'), act);
+  });
+
   /* ---------- start up ---------- */
-  Core.load();
-  try {
-    var saved = JSON.parse(localStorage.getItem(ONLINE_KEY) || 'null');
-    if (ONLINE_URL && saved && (saved.role === 'host' || saved.role === 'viewer') && typeof saved.code === 'string') online = saved;
-  } catch (e) {}
-  renderOnlinePanel();
-  if (online.role === 'viewer') startViewing();
-  else { render(); if (online.role === 'host') schedulePush(); }
+  function startApp() {
+    $('gatePanel').hidden = true;
+    $('appRoot').hidden = false;
+    $('adminBtn').hidden = !ONLINE_URL;
+    if (started) return;
+    started = true;
+    // Re-check with the server while the app is open, so removing or blocking someone locks them out.
+    if (ONLINE_URL && !accessTimer) accessTimer = setInterval(checkAccess, 15000);
+    Core.load();
+    online = { role: null, code: null, token: null };
+    try {
+      var saved = JSON.parse(localStorage.getItem(ONLINE_KEY) || 'null');
+      if (ONLINE_URL && saved && (saved.role === 'host' || saved.role === 'viewer') && typeof saved.code === 'string') online = saved;
+    } catch (e) {}
+    renderOnlinePanel();
+    if (online.role === 'viewer') startViewing();
+    else { render(); if (online.role === 'host') schedulePush(); }
+    if (ONLINE_URL && adminKeyVal()) adminLoad();
+  }
+
+  if (!ONLINE_URL) { access = 'approved'; startApp(); }
+  else if (lsGet(ACCESS_KEY) === 'approved') { access = 'approved'; startApp(); checkAccess(); }
+  else { renderGate(); checkAccess(); }
 })();
 </script>
 </body>
