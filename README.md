@@ -15,7 +15,7 @@ Live site: https://corbinplayz.github.io/blackjack/
 ## Files
 - `index.html` — the whole app (vanilla HTML/CSS/JS, no dependencies).
 - `worker/` — tiny Cloudflare Worker + Durable Object that relays the table state.
-- `.github/workflows/` — auto-deploy for the site (GitHub Pages) and the worker.
+- Site is served by GitHub Pages straight from `main` (Settings → Pages → Deploy from a branch → `main` / root).
 
 ## Turn on the online table (one-time)
 1. Cloudflare dashboard → create an **API token** (template: "Edit Cloudflare Workers") and note your **Account ID**.
