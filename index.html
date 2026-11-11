@@ -20,6 +20,7 @@
     --amber: #e0b13a;
   }
   * { box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
+  [hidden] { display: none !important; }
   html, body { margin: 0; background: var(--bg); color: var(--text); }
   body {
     font-family: -apple-system, BlinkMacSystemFont, "SF Pro Text", "Segoe UI", Roboto, sans-serif;
@@ -48,12 +49,17 @@
   button:active { filter: brightness(.85); }
   .btn-add { width: 100%; margin-top: 10px; font-size: 17px; }
   .btn-ghost { background: var(--card2); color: var(--text); border: 1px solid var(--line); }
-  .btn-danger { color: var(--red); }
   .toolbar { display: flex; gap: 10px; margin-bottom: 14px; }
   .toolbar button { flex: 1; font-size: 15px; }
   .msg { min-height: 18px; font-size: 14px; margin-top: 8px; color: var(--red); }
   .msg.ok { color: var(--green); }
   .empty { text-align: center; color: var(--muted); padding: 22px 8px; }
+
+  .online-status { font-size: 14px; color: var(--muted); margin-bottom: 10px; }
+  .online-code { font-size: 34px; font-weight: 800; letter-spacing: 6px; color: var(--green); margin: 2px 0 4px; }
+  .online-actions { display: flex; gap: 10px; }
+  .online-actions button { flex: 1; font-size: 15px; }
+  #joinCode { text-transform: uppercase; letter-spacing: 3px; }
 
   .player { background: var(--card); border: 1px solid var(--line); border-radius: 16px; padding: 14px; margin-bottom: 12px; }
   .ptop { display: flex; justify-content: space-between; align-items: flex-start; gap: 10px; }
@@ -62,6 +68,7 @@
   .remove { background: transparent; color: var(--muted); border: 1px solid var(--line); min-height: 38px; padding: 6px 12px; font-size: 13px; font-weight: 600; flex: none; }
   .balance { font-size: 40px; font-weight: 800; color: var(--green); margin: 8px 0 12px; font-variant-numeric: tabular-nums; word-break: break-all; }
   .balance.zero { color: var(--red); }
+  .player.view .balance { margin-bottom: 4px; }
   .wager { margin-bottom: 10px; }
   .wager label { display: block; font-size: 12px; color: var(--muted); margin-bottom: 4px; text-transform: uppercase; letter-spacing: .8px; }
   .outcomes { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
@@ -75,14 +82,41 @@
   .result.pos { color: var(--green); }
   .result.neg { color: var(--red); }
   .result.neu { color: var(--muted); }
+
+  .hist-row { display: flex; justify-content: space-between; gap: 10px; padding: 9px 0; border-top: 1px solid var(--line); font-size: 15px; }
+  .hist-row:first-of-type { border-top: 0; }
+  .hist-row .who { min-width: 0; word-break: break-word; }
+  .hist-row .what { color: var(--muted); font-size: 13px; }
+  .hist-row .amt { font-weight: 700; font-variant-numeric: tabular-nums; flex: none; }
+  .amt.pos { color: var(--green); } .amt.neg { color: var(--red); } .amt.neu { color: var(--muted); }
 </style>
 </head>
 <body>
 
 <h1>♠ Blackjack <span>Chip Tracker</span></h1>
 
+<!-- ONLINE TABLE -->
+<div class="panel" id="onlinePanel">
+  <h2>Online table</h2>
+  <div id="onlineOff">
+    <div class="online-status">Host from the dealer's phone; everyone else joins with a code and watches live balances.</div>
+    <button type="button" class="btn-add" id="hostBtn" style="margin-top:0">Host an online table</button>
+    <div class="row" style="margin-top:10px">
+      <div style="flex:2"><input type="text" id="joinCode" placeholder="Code" inputmode="text" autocomplete="off" autocapitalize="characters" maxlength="6"></div>
+      <div style="flex:1"><button type="button" class="btn-ghost" id="joinBtn" style="width:100%">Join</button></div>
+    </div>
+  </div>
+  <div id="onlineOn" hidden>
+    <div class="online-status" id="onlineLabel"></div>
+    <div class="online-code" id="onlineCode"></div>
+    <div class="online-status" id="onlineState"></div>
+    <div class="online-actions"><button type="button" class="btn-ghost" id="leaveBtn">Leave</button></div>
+  </div>
+  <div class="msg" id="onlineMsg" role="status"></div>
+</div>
+
 <!-- ADD PLAYER (no <form>: avoids submission/reload bugs) -->
-<div class="panel">
+<div class="panel" id="addPanel">
   <h2>Add player</h2>
   <div class="row">
     <div style="flex:3"><input type="text" id="newName" placeholder="Name" autocomplete="off" autocapitalize="words" maxlength="30"></div>
@@ -92,17 +126,29 @@
   <div class="msg" id="addMsg" role="status"></div>
 </div>
 
-<div class="toolbar">
+<div class="toolbar" id="toolbar">
+  <button type="button" class="btn-ghost" id="undoBtn">Undo Last Hand</button>
   <button type="button" class="btn-ghost" id="resetBtn">Reset Balances</button>
 </div>
+<div class="msg" id="toolMsg" role="status" style="margin:-6px 0 10px"></div>
 
 <div id="players"></div>
+
+<div class="panel" id="historyPanel">
+  <h2>Recent hands</h2>
+  <div id="history"></div>
+</div>
 
 <script>
 /* ============ CORE LOGIC (no DOM) — amounts are integer cents ============ */
 var Core = (function () {
-  var state = { players: [], nextId: 1 };
   var STORAGE_KEY = 'bjChipTracker.v1';
+  var HISTORY_MAX = 100;
+  var state = fresh();
+  var readOnly = false;      // viewer mode: never saves, never notifies
+  var listeners = [];
+
+  function fresh() { return { players: [], nextId: 1, history: [], nextHid: 1 }; }
 
   function parseMoney(str) {
     if (typeof str !== 'string') return null;
@@ -146,6 +192,7 @@ var Core = (function () {
 
   function resetAll() {
     state.players.forEach(function (p) { p.balance = p.start; });
+    state.history = [];
     save();
   }
 
@@ -164,30 +211,72 @@ var Core = (function () {
     else if (outcome === 'loss') delta = -w;
     else return { ok: false, error: 'Unknown outcome.' };
     p.balance += delta;
+    state.history.push({ id: state.nextHid++, pid: p.id, name: p.name, outcome: outcome, wager: w, delta: delta });
+    if (state.history.length > HISTORY_MAX) state.history.shift();
     save();
     return { ok: true, delta: delta, balance: p.balance };
   }
 
-  function save() {
-    try { localStorage.setItem(STORAGE_KEY, JSON.stringify(state)); } catch (e) {}
+  // Reverse the most recent settled hand (only that player's balance is touched).
+  function undo() {
+    var h = state.history.pop();
+    if (!h) return { ok: false, error: 'No hands to undo.' };
+    var p = findPlayer(h.pid);
+    if (p) p.balance -= h.delta;
+    save();
+    return { ok: true, entry: h, playerFound: !!p };
   }
+
+  function save() {
+    if (readOnly) return;
+    try { localStorage.setItem(STORAGE_KEY, JSON.stringify(state)); } catch (e) {}
+    listeners.forEach(function (f) { try { f(state); } catch (e) {} });
+  }
+
+  function normalize(s) {
+    if (!s || !Array.isArray(s.players) || typeof s.nextId !== 'number') return null;
+    var out = fresh();
+    out.nextId = s.nextId;
+    out.players = s.players.filter(function (p) {
+      return p && typeof p.id === 'number' && typeof p.name === 'string' &&
+             Number.isInteger(p.start) && Number.isInteger(p.balance);
+    }).map(function (p) { return { id: p.id, name: p.name, start: p.start, balance: p.balance }; });
+    var hist = Array.isArray(s.history) ? s.history : [];
+    out.history = hist.filter(function (h) {
+      return h && typeof h.id === 'number' && typeof h.pid === 'number' && typeof h.name === 'string' &&
+             typeof h.outcome === 'string' && Number.isInteger(h.wager) && Number.isInteger(h.delta);
+    }).map(function (h) { return { id: h.id, pid: h.pid, name: h.name, outcome: h.outcome, wager: h.wager, delta: h.delta }; });
+    out.nextHid = typeof s.nextHid === 'number' ? s.nextHid : out.history.length + 1;
+    return out;
+  }
+
   function load() {
     try {
       var raw = localStorage.getItem(STORAGE_KEY);
       if (!raw) return;
-      var s = JSON.parse(raw);
-      if (s && Array.isArray(s.players) && typeof s.nextId === 'number') {
-        state = { players: s.players.filter(function (p) {
-          return p && typeof p.id === 'number' && typeof p.name === 'string' &&
-                 Number.isInteger(p.start) && Number.isInteger(p.balance);
-        }), nextId: s.nextId };
-      }
+      var n = normalize(JSON.parse(raw));
+      if (n) state = n;
     } catch (e) {}
   }
 
+  // Viewer mode: show a remote table without touching this device's own saved table.
+  function setReadOnly(on) {
+    readOnly = !!on;
+    state = fresh();
+    if (!readOnly) load();
+  }
+  function setSnapshot(s) {
+    var n = normalize(s);
+    if (!n) return false;
+    state = n;
+    return true;
+  }
+  function onChange(fn) { listeners.push(fn); }
+
   return {
     parseMoney: parseMoney, fmt: fmt, addPlayer: addPlayer, removePlayer: removePlayer,
-    resetAll: resetAll, settle: settle, load: load,
+    resetAll: resetAll, settle: settle, undo: undo, load: load,
+    setReadOnly: setReadOnly, setSnapshot: setSnapshot, onChange: onChange,
     get state() { return state; }
   };
 })();
@@ -196,16 +285,19 @@ var Core = (function () {
 <script>
 /* ============ UI ============ */
 (function () {
+  /* Address of the deployed online-table service (see README). Leave '' to keep the app offline-only. */
+  var ONLINE_URL = '';
+
   var $ = function (id) { return document.getElementById(id); };
   var nameEl = $('newName'), startEl = $('newStart'), addMsg = $('addMsg');
-  var listEl = $('players');
+  var listEl = $('players'), historyEl = $('history'), toolMsg = $('toolMsg');
   var wagers = {};   // id -> wager text (kept across re-renders)
   var results = {};  // id -> {text, cls}
+  var viewer = false;
+  var LABEL = { win: 'Win', blackjack: 'Blackjack', push: 'Push', loss: 'Loss' };
 
-  function setAddMsg(text, ok) {
-    addMsg.textContent = text;
-    addMsg.className = 'msg' + (ok ? ' ok' : '');
-  }
+  function setAddMsg(text, ok) { addMsg.textContent = text; addMsg.className = 'msg' + (ok ? ' ok' : ''); }
+  function setToolMsg(text) { toolMsg.textContent = text; }
 
   function el(tag, cls, text) {
     var e = document.createElement(tag);
@@ -213,51 +305,83 @@ var Core = (function () {
     if (text !== undefined) e.textContent = text;
     return e;
   }
+  function signed(delta) { return delta > 0 ? '+' + Core.fmt(delta) : Core.fmt(delta); }
 
   function render() {
+    $('addPanel').hidden = viewer;
+    $('toolbar').hidden = viewer;
+    toolMsg.hidden = viewer;
+    renderPlayers();
+    renderHistory();
+  }
+
+  function renderPlayers() {
     listEl.innerHTML = '';
     var players = Core.state.players;
     if (!players.length) {
-      listEl.appendChild(el('div', 'empty', 'No players yet. Add one above.'));
+      listEl.appendChild(el('div', 'empty', viewer ? 'Waiting for the dealer to add players.' : 'No players yet. Add one above.'));
       return;
     }
     players.forEach(function (p) {
-      var card = el('div', 'player'); card.setAttribute('data-id', p.id);
+      var card = el('div', 'player' + (viewer ? ' view' : '')); card.setAttribute('data-id', p.id);
 
       var top = el('div', 'ptop');
       var info = el('div');
       info.appendChild(el('div', 'pname', p.name));
       info.appendChild(el('div', 'pstart', 'Started with ' + Core.fmt(p.start)));
-      var rm = el('button', 'remove', 'Remove'); rm.type = 'button'; rm.setAttribute('data-action', 'remove');
-      top.appendChild(info); top.appendChild(rm);
+      top.appendChild(info);
+      if (!viewer) {
+        var rm = el('button', 'remove', 'Remove'); rm.type = 'button'; rm.setAttribute('data-action', 'remove');
+        top.appendChild(rm);
+      }
       card.appendChild(top);
 
       card.appendChild(el('div', 'balance' + (p.balance === 0 ? ' zero' : ''), Core.fmt(p.balance)));
 
-      var wrap = el('div', 'wager');
-      var lab = el('label', null, 'Wager'); lab.setAttribute('for', 'w' + p.id);
-      var inp = el('input'); inp.type = 'text'; inp.id = 'w' + p.id;
-      inp.setAttribute('inputmode', 'decimal'); inp.setAttribute('autocomplete', 'off');
-      inp.placeholder = 'Wager $'; inp.setAttribute('data-wager', p.id);
-      inp.value = wagers[p.id] || '';
-      wrap.appendChild(lab); wrap.appendChild(inp);
-      card.appendChild(wrap);
+      if (!viewer) {
+        var wrap = el('div', 'wager');
+        var lab = el('label', null, 'Wager'); lab.setAttribute('for', 'w' + p.id);
+        var inp = el('input'); inp.type = 'text'; inp.id = 'w' + p.id;
+        inp.setAttribute('inputmode', 'decimal'); inp.setAttribute('autocomplete', 'off');
+        inp.placeholder = 'Wager $'; inp.setAttribute('data-wager', p.id);
+        inp.value = wagers[p.id] || '';
+        wrap.appendChild(lab); wrap.appendChild(inp);
+        card.appendChild(wrap);
 
-      var grid = el('div', 'outcomes');
-      [['win', 'Win 1:1', 'o-win'], ['blackjack', 'Blackjack 3:2', 'o-bj'],
-       ['push', 'Push', 'o-push'], ['loss', 'Loss', 'o-loss']].forEach(function (o) {
-        var b = el('button', o[2], o[1]); b.type = 'button';
-        b.setAttribute('data-action', 'settle'); b.setAttribute('data-outcome', o[0]);
-        grid.appendChild(b);
-      });
-      card.appendChild(grid);
+        var grid = el('div', 'outcomes');
+        [['win', 'Win 1:1', 'o-win'], ['blackjack', 'Blackjack 3:2', 'o-bj'],
+         ['push', 'Push', 'o-push'], ['loss', 'Loss', 'o-loss']].forEach(function (o) {
+          var b = el('button', o[2], o[1]); b.type = 'button';
+          b.setAttribute('data-action', 'settle'); b.setAttribute('data-outcome', o[0]);
+          grid.appendChild(b);
+        });
+        card.appendChild(grid);
 
-      var r = results[p.id];
-      card.appendChild(el('div', 'result' + (r ? ' ' + r.cls : ''), r ? r.text : ''));
+        var r = results[p.id];
+        card.appendChild(el('div', 'result' + (r ? ' ' + r.cls : ''), r ? r.text : ''));
+      }
       listEl.appendChild(card);
     });
   }
 
+  function renderHistory() {
+    historyEl.innerHTML = '';
+    var h = Core.state.history;
+    if (!h.length) { historyEl.appendChild(el('div', 'empty', 'No hands yet.')); return; }
+    for (var i = h.length - 1, shown = 0; i >= 0 && shown < 10; i--, shown++) {
+      var e = h[i];
+      var row = el('div', 'hist-row');
+      var who = el('div', 'who');
+      who.appendChild(el('div', null, e.name));
+      who.appendChild(el('div', 'what', (LABEL[e.outcome] || e.outcome) + ' · bet ' + Core.fmt(e.wager)));
+      row.appendChild(who);
+      row.appendChild(el('div', 'amt ' + (e.delta > 0 ? 'pos' : e.delta < 0 ? 'neg' : 'neu'),
+        e.delta === 0 ? 'Push' : signed(e.delta)));
+      historyEl.appendChild(row);
+    }
+  }
+
+  /* ---------- host actions ---------- */
   function addPlayer() {
     var res = Core.addPlayer(nameEl.value, startEl.value);
     if (!res.ok) { setAddMsg(res.error, false); return; }
@@ -276,10 +400,23 @@ var Core = (function () {
 
   $('resetBtn').addEventListener('click', function (e) {
     e.preventDefault();
-    if (!Core.state.players.length) return;
-    if (!window.confirm('Reset every balance to its starting amount?')) return;
+    if (viewer || !Core.state.players.length) return;
+    if (!window.confirm('Reset every balance to its starting amount? This also clears recent hands.')) return;
     Core.resetAll();
     results = {};
+    setToolMsg('');
+    render();
+  });
+
+  $('undoBtn').addEventListener('click', function (e) {
+    e.preventDefault();
+    if (viewer) return;
+    var res = Core.undo();
+    if (!res.ok) { setToolMsg(res.error); return; }
+    var en = res.entry;
+    delete results[en.pid];
+    setToolMsg(res.playerFound ? 'Undid ' + en.name + '’s ' + (LABEL[en.outcome] || en.outcome).toLowerCase() + ' (' + signed(en.delta) + ').'
+                               : 'Removed the last hand (' + en.name + ' is no longer at the table).');
     render();
   });
 
@@ -293,6 +430,7 @@ var Core = (function () {
   });
 
   listEl.addEventListener('click', function (e) {
+    if (viewer) return;
     var btn = e.target.closest ? e.target.closest('button[data-action]') : null;
     if (!btn) return;
     e.preventDefault();
@@ -315,10 +453,11 @@ var Core = (function () {
       var wagerText = card.querySelector('input[data-wager]').value;
       wagers[id] = wagerText;
       var res = Core.settle(id, wagerText, outcome);
+      setToolMsg('');
       if (!res.ok) {
         results[id] = { text: res.error, cls: 'err' };
       } else {
-        var label = { win: 'Win', blackjack: 'Blackjack', push: 'Push', loss: 'Loss' }[outcome];
+        var label = LABEL[outcome];
         var txt = res.delta > 0 ? label + ': +' + Core.fmt(res.delta)
                 : res.delta < 0 ? label + ': ' + Core.fmt(res.delta)
                 : label + ': balance unchanged';
@@ -328,8 +467,163 @@ var Core = (function () {
     }
   });
 
+  /* ============ ONLINE TABLE ============
+     Host (dealer) phone is the source of truth and pushes the table after every change.
+     Joiners poll read-only. If ONLINE_URL is '' none of this runs and the app stays offline. */
+  var ONLINE_KEY = 'bjOnline.v1';
+  var online = { role: null, code: null, token: null };   // role: 'host' | 'viewer' | null
+  var pollTimer = null, lastV = -1, pushing = false, dirty = false, polling = false;
+
+  function saveOnline() {
+    try {
+      if (online.role) localStorage.setItem(ONLINE_KEY, JSON.stringify(online));
+      else localStorage.removeItem(ONLINE_KEY);
+    } catch (e) {}
+  }
+  function setOnlineMsg(text, ok) { $('onlineMsg').textContent = text; $('onlineMsg').className = 'msg' + (ok ? ' ok' : ''); }
+  function setOnlineState(text) { $('onlineState').textContent = text; }
+  function sleep(ms) { return new Promise(function (r) { setTimeout(r, ms); }); }
+
+  function renderOnlinePanel() {
+    var on = !!online.role;
+    $('onlineOff').hidden = on;
+    $('onlineOn').hidden = !on;
+    if (on) {
+      $('onlineLabel').textContent = online.role === 'host' ? 'You are hosting. Share this code:' : 'Watching table:';
+      $('onlineCode').textContent = online.code;
+      $('leaveBtn').textContent = online.role === 'host' ? 'Stop hosting' : 'Leave table';
+    }
+  }
+
+  function clearOnline(msg) {
+    var wasViewer = online.role === 'viewer';
+    if (pollTimer) { clearInterval(pollTimer); pollTimer = null; }
+    online = { role: null, code: null, token: null };
+    dirty = false; lastV = -1;
+    saveOnline();
+    if (wasViewer) { viewer = false; Core.setReadOnly(false); wagers = {}; results = {}; }
+    renderOnlinePanel();
+    setOnlineMsg(msg || '', false);
+    render();
+  }
+
+  function needUrl() {
+    if (ONLINE_URL) return false;
+    setOnlineMsg('Online play is not set up on this copy yet (see README).', false);
+    return true;
+  }
+
+  /* --- host --- */
+  async function hostTable() {
+    if (needUrl()) return;
+    setOnlineMsg('Creating table…', true);
+    try {
+      var r = await fetch(ONLINE_URL + '/api/rooms', { method: 'POST' });
+      if (!r.ok) throw new Error('status ' + r.status);
+      var d = await r.json();
+      online = { role: 'host', code: d.code, token: d.token };
+      saveOnline();
+      renderOnlinePanel();
+      setOnlineMsg('', true);
+      schedulePush();
+    } catch (e) {
+      setOnlineMsg('Could not create the table. Check your connection and try again.', false);
+    }
+  }
+
+  function schedulePush() {
+    if (online.role !== 'host') return;
+    dirty = true;
+    if (!pushing) pushLoop();
+  }
+
+  async function pushLoop() {
+    pushing = true;
+    while (dirty && online.role === 'host') {
+      dirty = false;
+      try {
+        var r = await fetch(ONLINE_URL + '/api/rooms/' + online.code, {
+          method: 'PUT',
+          headers: { 'Authorization': 'Bearer ' + online.token, 'Content-Type': 'application/json' },
+          body: JSON.stringify({ state: Core.state })
+        });
+        if (r.status === 401 || r.status === 404) { pushing = false; clearOnline('That table expired. Host a new one.'); return; }
+        if (!r.ok) throw new Error('status ' + r.status);
+        setOnlineState('Live · players can see updates');
+      } catch (e) {
+        dirty = true;
+        setOnlineState('Reconnecting… (the table still works here)');
+        await sleep(3000);
+      }
+    }
+    pushing = false;
+  }
+  Core.onChange(function () { schedulePush(); });
+
+  /* --- viewer --- */
+  async function pollOnce() {
+    if (polling || online.role !== 'viewer') return;
+    polling = true;
+    try {
+      var r = await fetch(ONLINE_URL + '/api/rooms/' + online.code, { cache: 'no-store' });
+      if (r.status === 404) { polling = false; clearOnline('That table has closed.'); return; }
+      if (!r.ok) throw new Error('status ' + r.status);
+      var d = await r.json();
+      if (d.v !== lastV && Core.setSnapshot(d.state)) { lastV = d.v; render(); }
+      setOnlineState('Live');
+    } catch (e) {
+      setOnlineState('Reconnecting…');
+    }
+    polling = false;
+  }
+
+  function startViewing() {
+    viewer = true;
+    Core.setReadOnly(true);
+    lastV = -1;
+    renderOnlinePanel();
+    render();
+    pollOnce();
+    pollTimer = setInterval(pollOnce, 2500);
+  }
+
+  async function joinTable() {
+    if (needUrl()) return;
+    var code = $('joinCode').value.trim().toUpperCase();
+    if (!/^[A-Z0-9]{4,6}$/.test(code)) { setOnlineMsg('Enter the table code from the dealer.', false); return; }
+    setOnlineMsg('Joining…', true);
+    try {
+      var r = await fetch(ONLINE_URL + '/api/rooms/' + code, { cache: 'no-store' });
+      if (r.status === 404) { setOnlineMsg('No table with that code.', false); return; }
+      if (!r.ok) throw new Error('status ' + r.status);
+      online = { role: 'viewer', code: code, token: null };
+      saveOnline();
+      $('joinCode').value = '';
+      setOnlineMsg('', true);
+      startViewing();
+    } catch (e) {
+      setOnlineMsg('Could not reach the table. Check your connection.', false);
+    }
+  }
+
+  $('hostBtn').addEventListener('click', function (e) { e.preventDefault(); hostTable(); });
+  $('joinBtn').addEventListener('click', function (e) { e.preventDefault(); joinTable(); });
+  $('joinCode').addEventListener('keydown', function (e) { if (e.key === 'Enter') { e.preventDefault(); joinTable(); } });
+  $('leaveBtn').addEventListener('click', function (e) {
+    e.preventDefault();
+    if (online.role === 'host' && !window.confirm('Stop hosting? Players will stop seeing updates.')) return;
+    clearOnline('');
+  });
+
+  /* ---------- start up ---------- */
   Core.load();
-  render();
+  try {
+    var saved = JSON.parse(localStorage.getItem(ONLINE_KEY) || 'null');
+    if (ONLINE_URL && saved && (saved.role === 'host' || saved.role === 'viewer') && typeof saved.code === 'string') online = saved;
+  } catch (e) {}
+  renderOnlinePanel();
+  if (online.role === 'viewer') startViewing();
+  else { render(); if (online.role === 'host') schedulePush(); }
 })();
 </script>
 </body>
