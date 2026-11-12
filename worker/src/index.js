@@ -60,7 +60,8 @@ export function normalizeTable(t) {
   t = t && typeof t === 'object' ? t : {};
   const players = (Array.isArray(t.players) ? t.players : []).map(p => {
     const q = { id: p.id, name: String(p.name), start: p.start, balance: p.balance,
-      added: Number.isInteger(p.added) && p.added > 0 ? p.added : 0 };    // chips added after the buy-in (so net profit is honest)
+      added: Number.isInteger(p.added) && p.added > 0 ? p.added : 0,     // chips taken from the bank after the buy-in (so net profit is honest)
+      takes: Number.isInteger(p.takes) && p.takes > 0 ? p.takes : 0 };   // how many times they went to the bank
     if (typeof p.owner === 'string' && p.owner) q.owner = p.owner;
     return q;
   });
@@ -74,7 +75,8 @@ export function normalizeTable(t) {
     nextId: Math.max(typeof t.nextId === 'number' ? t.nextId : 1, maxId + 1),
     nextHid: Math.max(typeof t.nextHid === 'number' ? t.nextHid : 1, maxHid + 1),
     settings: { locked: st.locked === true, maxBuyin: isCents(st.maxBuyin) ? st.maxBuyin : 0,
-      bankFee: Number.isInteger(st.bankFee) && st.bankFee >= 0 && st.bankFee <= 50 ? st.bankFee : 10 },   // % kept by the bank when chips are added
+      bankFee: Number.isInteger(st.bankFee) && st.bankFee >= 0 && st.bankFee <= 50 ? st.bankFee : 10,
+      bankLimit: Number.isInteger(st.bankLimit) && st.bankLimit >= 0 && st.bankLimit <= 20 ? st.bankLimit : 3 },   // max bank trips per player (0 = no limit)   // % kept by the bank when chips are added
   };
 }
 
@@ -101,7 +103,7 @@ export function applyAction(t, actor, a) {
       const name = cleanName(a.name);
       if (!name) return deny('Enter a player name.');
       if (!isCents(a.start)) return deny('Starting balance must be more than $0.');
-      t.players.push({ id: t.nextId++, name, start: a.start, balance: a.start, added: 0 });
+      t.players.push({ id: t.nextId++, name, start: a.start, balance: a.start, added: 0, takes: 0 });
       return { ok: true };
     }
     case 'seat': {                                   // a player takes their own seat
@@ -113,7 +115,7 @@ export function applyAction(t, actor, a) {
       if (!isCents(a.buyin)) return deny('Starting balance must be more than $0.');
       const m = overMax(a.buyin); if (m) return deny(m);
       if (t.players.length >= 100) return deny('The table is full.');
-      t.players.push({ id: t.nextId++, name, start: a.buyin, balance: a.buyin, added: 0, owner: actor.ref });
+      t.players.push({ id: t.nextId++, name, start: a.buyin, balance: a.buyin, added: 0, takes: 0, owner: actor.ref });
       return { ok: true };
     }
     case 'settle': {
@@ -152,11 +154,12 @@ export function applyAction(t, actor, a) {
       if (!may(p)) return deny(NOT_YOURS);
       if (!isCents(a.amount)) return deny('Enter an amount of chips to add.');
       const m = overMax(a.amount); if (m) return deny(m);
+      if (t.settings.bankLimit && p.takes >= t.settings.bankLimit) return deny('The bank has cut you off: ' + p.takes + ' of ' + t.settings.bankLimit + ' trips used.');
       const fee = Math.ceil(a.amount * t.settings.bankFee / 100);   // taking chips from the bank costs a fee
       const got = a.amount - fee;
       if (got < 1) return deny('Too small: the ' + t.settings.bankFee + '% bank fee would take all of it.');
       p.balance += got;
-      p.added += a.amount;                                  // you took the full amount out, so the fee shows up as a loss
+      p.added += a.amount; p.takes += 1;                    // you took the full amount out, so the fee shows up as a loss
       logHand(p, 'rebuy', fee, got);                        // wager column = the fee
       return { ok: true, delta: got, fee, balance: p.balance };
     }
@@ -171,7 +174,7 @@ export function applyAction(t, actor, a) {
       if (idx < 0) return deny('No hands to undo.');
       const h = t.history.splice(idx, 1)[0];
       const p = find(h.pid);
-      if (p) { p.balance -= h.delta; if (h.outcome === 'rebuy') p.added = Math.max(0, p.added - h.delta - h.wager); } // newest entry of that seat, so the balance can't go negative
+      if (p) { p.balance -= h.delta; if (h.outcome === 'rebuy') { p.added = Math.max(0, p.added - h.delta - h.wager); p.takes = Math.max(0, p.takes - 1); } } // newest entry of that seat, so the balance can't go negative
       return { ok: true, entry: h, playerFound: !!p };
     }
     case 'remove': {                                 // host removes anyone; a player can only leave their own seat
@@ -183,7 +186,7 @@ export function applyAction(t, actor, a) {
     }
     case 'reset': {
       if (!host) return deny('Only the host can reset the table.');
-      t.players.forEach(p => { p.balance = p.start; p.added = 0; });
+      t.players.forEach(p => { p.balance = p.start; p.added = 0; p.takes = 0; });
       t.history = [];
       return { ok: true };
     }
@@ -197,6 +200,10 @@ export function applyAction(t, actor, a) {
       if (a.bankFee !== undefined) {
         if (!Number.isInteger(a.bankFee) || a.bankFee < 0 || a.bankFee > 50) return deny('Bank fee must be a whole number from 0 to 50.');
         t.settings.bankFee = a.bankFee;
+      }
+      if (a.bankLimit !== undefined) {
+        if (!Number.isInteger(a.bankLimit) || a.bankLimit < 0 || a.bankLimit > 20) return deny('Bank limit must be a whole number from 0 to 20.');
+        t.settings.bankLimit = a.bankLimit;
       }
       return { ok: true };
     }
@@ -375,7 +382,7 @@ export class Room {
     if (!body || !validState(body.state)) return json({ error: 'bad state' }, 400);
     if (live.v !== 0) return json({ error: 'This table has already started.' }, 409);
     const seed = normalizeTable(Object.assign({}, body.state, {
-      players: body.state.players.map(p => ({ id: p.id, name: p.name, start: p.start, balance: p.balance, added: p.added })), // no owners
+      players: body.state.players.map(p => ({ id: p.id, name: p.name, start: p.start, balance: p.balance, added: p.added, takes: p.takes })), // no owners
     }));
     await this.state.storage.put('table', seed);
     await this.state.storage.put('meta', { token: live.token, v: 1, updated: now });

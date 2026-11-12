@@ -291,6 +291,10 @@
     <div style="flex:2"><input type="text" id="bankFee" placeholder="Fee % (0 to 50)" inputmode="numeric" autocomplete="off"></div>
     <div style="flex:1"><button type="button" class="btn-ghost" id="bankFeeBtn" style="width:100%">Set fee</button></div>
   </div>
+  <div class="row mt">
+    <div style="flex:2"><input type="text" id="bankLimit" placeholder="Max trips per player (0 = no limit)" inputmode="numeric" autocomplete="off"></div>
+    <div style="flex:1"><button type="button" class="btn-ghost" id="bankLimitBtn" style="width:100%">Set limit</button></div>
+  </div>
   <div class="msg" id="feeMsg" role="status"></div>
 </div>
 
@@ -350,7 +354,7 @@ var Core = (function () {
   var readOnly = false;      // viewer mode: never saves, never notifies
   var listeners = [];
 
-  function fresh() { return { players: [], nextId: 1, history: [], nextHid: 1, settings: { locked: false, maxBuyin: 0, bankFee: 10 } }; }
+  function fresh() { return { players: [], nextId: 1, history: [], nextHid: 1, settings: { locked: false, maxBuyin: 0, bankFee: 10, bankLimit: 3 } }; }
 
   function parseMoney(str) {
     if (typeof str !== 'string') return null;
@@ -397,7 +401,7 @@ var Core = (function () {
   function addPlayer(name, startStr) {
     var chk = checkPlayer(name, startStr);
     if (!chk.ok) return chk;
-    var p = { id: state.nextId++, name: chk.name, start: chk.cents, balance: chk.cents, added: 0 };
+    var p = { id: state.nextId++, name: chk.name, start: chk.cents, balance: chk.cents, added: 0, takes: 0 };
     state.players.push(p);
     save();
     return { ok: true, player: p };
@@ -411,7 +415,7 @@ var Core = (function () {
   }
 
   function resetAll() {
-    state.players.forEach(function (p) { p.balance = p.start; p.added = 0; });
+    state.players.forEach(function (p) { p.balance = p.start; p.added = 0; p.takes = 0; });
     state.history = [];
     save();
   }
@@ -461,15 +465,22 @@ var Core = (function () {
     if (!p) return { ok: false, error: 'Player not found.' };
     var ac = checkAmount(amountStr);
     if (!ac.ok) return ac;
+    var lim = state.settings.bankLimit;
+    if (lim && (p.takes || 0) >= lim) return { ok: false, error: 'The bank has cut you off: ' + (p.takes || 0) + ' of ' + lim + ' trips used.' };
     var fee = Math.ceil(ac.cents * state.settings.bankFee / 100);     // taking chips from the bank costs a fee
     var got = ac.cents - fee;
     if (got < 1) return { ok: false, error: 'Too small: the ' + state.settings.bankFee + '% bank fee would take all of it.' };
     p.balance += got;
-    p.added = (p.added || 0) + ac.cents;                               // you took the full amount out, so the fee shows up as a loss
+    p.added = (p.added || 0) + ac.cents; p.takes = (p.takes || 0) + 1; // you took the full amount out, so the fee shows up as a loss
     state.history.push({ id: state.nextHid++, pid: p.id, name: p.name, outcome: 'rebuy', wager: fee, delta: got });
     if (state.history.length > HISTORY_MAX) state.history.shift();
     save();
     return { ok: true, delta: got, fee: fee, balance: p.balance };
+  }
+  function setBankLimit(n) {
+    if (!Number.isInteger(n) || n < 0 || n > 20) return { ok: false, error: 'Bank limit must be a whole number from 0 to 20.' };
+    state.settings.bankLimit = n; save();
+    return { ok: true };
   }
   function setBankFee(n) {
     if (!Number.isInteger(n) || n < 0 || n > 50) return { ok: false, error: 'Bank fee must be a whole number from 0 to 50.' };
@@ -482,7 +493,7 @@ var Core = (function () {
     var h = state.history.pop();
     if (!h) return { ok: false, error: 'No hands to undo.' };
     var p = findPlayer(h.pid);
-    if (p) { p.balance -= h.delta; if (h.outcome === 'rebuy') p.added = Math.max(0, (p.added || 0) - h.delta - h.wager); }
+    if (p) { p.balance -= h.delta; if (h.outcome === 'rebuy') { p.added = Math.max(0, (p.added || 0) - h.delta - h.wager); p.takes = Math.max(0, (p.takes || 0) - 1); } }
     save();
     return { ok: true, entry: h, playerFound: !!p };
   }
@@ -501,13 +512,14 @@ var Core = (function () {
       return p && typeof p.id === 'number' && typeof p.name === 'string' &&
              Number.isInteger(p.start) && Number.isInteger(p.balance);
     }).map(function (p) {
-      var q = { id: p.id, name: p.name, start: p.start, balance: p.balance, added: Number.isInteger(p.added) && p.added > 0 ? p.added : 0 };
+      var q = { id: p.id, name: p.name, start: p.start, balance: p.balance, added: Number.isInteger(p.added) && p.added > 0 ? p.added : 0, takes: Number.isInteger(p.takes) && p.takes > 0 ? p.takes : 0 };
       if (typeof p.owner === 'string' && p.owner) q.owner = p.owner;     // which device sits at this seat (online only)
       return q;
     });
     var st = s.settings && typeof s.settings === 'object' ? s.settings : {};
     out.settings = { locked: st.locked === true, maxBuyin: Number.isInteger(st.maxBuyin) && st.maxBuyin > 0 ? st.maxBuyin : 0,
-      bankFee: Number.isInteger(st.bankFee) && st.bankFee >= 0 && st.bankFee <= 50 ? st.bankFee : 10 };
+      bankFee: Number.isInteger(st.bankFee) && st.bankFee >= 0 && st.bankFee <= 50 ? st.bankFee : 10,
+      bankLimit: Number.isInteger(st.bankLimit) && st.bankLimit >= 0 && st.bankLimit <= 20 ? st.bankLimit : 3 };
     var hist = Array.isArray(s.history) ? s.history : [];
     out.history = hist.filter(function (h) {
       return h && typeof h.id === 'number' && typeof h.pid === 'number' && typeof h.name === 'string' &&
@@ -537,7 +549,7 @@ var Core = (function () {
     var n = normalize(s);
     if (!n) return false;
     n.players.forEach(function (p) { delete p.owner; });
-    n.settings = { locked: false, maxBuyin: 0, bankFee: n.settings.bankFee };
+    n.settings = { locked: false, maxBuyin: 0, bankFee: n.settings.bankFee, bankLimit: n.settings.bankLimit };
     readOnly = false;
     state = n;
     save();
@@ -553,7 +565,7 @@ var Core = (function () {
 
   return {
     parseMoney: parseMoney, fmt: fmt, addPlayer: addPlayer, removePlayer: removePlayer,
-    resetAll: resetAll, settle: settle, insurance: insurance, rebuy: rebuy, setBankFee: setBankFee, undo: undo, load: load,
+    resetAll: resetAll, settle: settle, insurance: insurance, rebuy: rebuy, setBankFee: setBankFee, setBankLimit: setBankLimit, undo: undo, load: load,
     checkPlayer: checkPlayer, checkWager: checkWager, checkAmount: checkAmount,
     setReadOnly: setReadOnly, setSnapshot: setSnapshot, adopt: adopt, onChange: onChange,
     get state() { return state; }
@@ -1093,7 +1105,7 @@ var Core = (function () {
     $('toolbar').hidden = pr && (!seat || locked);
     $('resetBtn').hidden = pr;
     $('rulesPanel').hidden = pr;
-    $('feeInfo').textContent = 'Taking chips from the bank costs a ' + Core.state.settings.bankFee + '% fee, and chips taken count against net profit.';
+    $('feeInfo').textContent = 'Taking chips from the bank costs a ' + Core.state.settings.bankFee + '% fee, each player can go ' + (Core.state.settings.bankLimit ? Core.state.settings.bankLimit + ' time' + (Core.state.settings.bankLimit === 1 ? '' : 's') : 'as often as they like') + ', and chips taken count against net profit.';
     $('undoBtn').textContent = pr ? 'Undo my last hand' : 'Undo Last Hand';
     toolMsg.hidden = $('toolbar').hidden;
     $('hostTools').hidden = online.role !== 'host';
@@ -1213,7 +1225,7 @@ var Core = (function () {
         det.open = !!chipsOpen[p.id];
         det.addEventListener('toggle', function () { chipsOpen[p.id] = det.open; });
         det.appendChild(el('summary', null, 'More: add chips, insurance'));
-        det.appendChild(el('div', 'sub', 'Take chips from the bank (' + Core.state.settings.bankFee + '% fee)'));
+        det.appendChild(el('div', 'sub', 'Take chips from the bank (' + Core.state.settings.bankFee + '% fee' + (Core.state.settings.bankLimit ? ', ' + Math.max(0, Core.state.settings.bankLimit - (p.takes || 0)) + ' of ' + Core.state.settings.bankLimit + ' trips left' : '') + ')'));
         var crow = el('div', 'row mt');
         var cin = el('input'); cin.type = 'text'; cin.id = 'c' + p.id; cin.placeholder = 'Chips $';
         cin.setAttribute('inputmode', 'decimal'); cin.setAttribute('autocomplete', 'off'); cin.setAttribute('data-chips', p.id);
@@ -1259,7 +1271,10 @@ var Core = (function () {
       case 'add': return Core.addPlayer(a.name, a.startText);
       case 'settle': return Core.settle(a.pid, a.wagerText, a.outcome);
       case 'rebuy': return Core.rebuy(a.pid, a.amountText);
-      case 'settings': return a.settings && a.settings.bankFee !== undefined ? Core.setBankFee(a.settings.bankFee) : { ok: true };
+      case 'settings':
+        if (a.settings && a.settings.bankFee !== undefined) return Core.setBankFee(a.settings.bankFee);
+        if (a.settings && a.settings.bankLimit !== undefined) return Core.setBankLimit(a.settings.bankLimit);
+        return { ok: true };
       case 'insure': return Core.insurance(a.pid, a.wagerText, a.result);
       case 'remove': return { ok: Core.removePlayer(a.pid) };
       case 'undo': return Core.undo();
@@ -1609,6 +1624,20 @@ var Core = (function () {
       $('feeMsg').textContent = res.ok ? 'Bank fee is now ' + parseInt(txt, 10) + '%.' : res.error;
       $('feeMsg').className = 'msg' + (res.ok ? ' ok' : '');
       if (res.ok) { $('bankFee').value = ''; render(); }
+    } finally { busy = false; }
+  });
+  $('bankLimitBtn').addEventListener('click', async function (e) {
+    e.preventDefault();
+    if (busy || isPlayer()) return;
+    var txt = $('bankLimit').value.trim();
+    if (!/^\d{1,2}$/.test(txt) || parseInt(txt, 10) > 20) { $('feeMsg').textContent = 'Enter a whole number from 0 to 20 (0 = no limit).'; $('feeMsg').className = 'msg'; return; }
+    busy = true;
+    try {
+      var n = parseInt(txt, 10);
+      var res = await perform({ type: 'settings', settings: { bankLimit: n } });
+      $('feeMsg').textContent = res.ok ? (n ? 'Each player can go to the bank ' + n + ' time' + (n === 1 ? '' : 's') + '.' : 'No limit on bank trips.') : res.error;
+      $('feeMsg').className = 'msg' + (res.ok ? ' ok' : '');
+      if (res.ok) { $('bankLimit').value = ''; render(); }
     } finally { busy = false; }
   });
   $('maxBuyinBtn').addEventListener('click', async function (e) {
