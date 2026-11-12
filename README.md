@@ -6,6 +6,9 @@ Every player bets alone against the dealer; there is no shared pot.
 - Win pays 1:1, Blackjack pays 3:2, Push returns the wager, Loss loses it.
 - Wagers larger than a player's balance are rejected.
 - Recent hands list, **Undo Last Hand**, **Add chips** (logged), add/remove players, reset balances.
+- **Standings**: ranked by balance with net profit vs. buy-in (chips added later are not counted as winnings).
+- **Double x2** button for the wager box (checks your balance). Splits are just two separate hands.
+- **Insurance**: side bet of half the wager, pays 2:1; needs enough chips for the bet plus the side bet.
 - Works offline on one phone (saved in the browser).
 
 ## Online table (host + players)

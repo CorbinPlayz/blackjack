@@ -59,7 +59,8 @@ function fmt(cents) {
 export function normalizeTable(t) {
   t = t && typeof t === 'object' ? t : {};
   const players = (Array.isArray(t.players) ? t.players : []).map(p => {
-    const q = { id: p.id, name: String(p.name), start: p.start, balance: p.balance };
+    const q = { id: p.id, name: String(p.name), start: p.start, balance: p.balance,
+      added: Number.isInteger(p.added) && p.added > 0 ? p.added : 0 };    // chips added after the buy-in (so net profit is honest)
     if (typeof p.owner === 'string' && p.owner) q.owner = p.owner;
     return q;
   });
@@ -99,7 +100,7 @@ export function applyAction(t, actor, a) {
       const name = cleanName(a.name);
       if (!name) return deny('Enter a player name.');
       if (!isCents(a.start)) return deny('Starting balance must be more than $0.');
-      t.players.push({ id: t.nextId++, name, start: a.start, balance: a.start });
+      t.players.push({ id: t.nextId++, name, start: a.start, balance: a.start, added: 0 });
       return { ok: true };
     }
     case 'seat': {                                   // a player takes their own seat
@@ -111,7 +112,7 @@ export function applyAction(t, actor, a) {
       if (!isCents(a.buyin)) return deny('Starting balance must be more than $0.');
       const m = overMax(a.buyin); if (m) return deny(m);
       if (t.players.length >= 100) return deny('The table is full.');
-      t.players.push({ id: t.nextId++, name, start: a.buyin, balance: a.buyin, owner: actor.ref });
+      t.players.push({ id: t.nextId++, name, start: a.buyin, balance: a.buyin, added: 0, owner: actor.ref });
       return { ok: true };
     }
     case 'settle': {
@@ -130,6 +131,20 @@ export function applyAction(t, actor, a) {
       logHand(p, a.outcome, a.wager, delta);
       return { ok: true, delta, balance: p.balance };
     }
+    case 'insurance': {                              // side bet = half the main wager, pays 2:1
+      const p = find(a.pid);
+      if (!p) return deny('Player not found.');
+      if (!may(p)) return deny(NOT_YOURS);
+      if (!Number.isInteger(a.wager) || a.wager <= 0) return deny('Wager must be more than $0.');
+      if (a.result !== 'win' && a.result !== 'loss') return deny('Unknown insurance result.');
+      const side = Math.floor(a.wager / 2);
+      if (side <= 0) return deny('Wager is too small to insure.');
+      if (a.wager + side > p.balance) return deny('Not enough chips to also insure (' + fmt(side) + ' on top of the bet).');
+      const delta = a.result === 'win' ? side * 2 : -side;
+      p.balance += delta;
+      logHand(p, a.result === 'win' ? 'insurance_win' : 'insurance_loss', side, delta);
+      return { ok: true, delta, balance: p.balance };
+    }
     case 'rebuy': {                                  // adding chips is logged so everyone can see it
       const p = find(a.pid);
       if (!p) return deny('Player not found.');
@@ -137,6 +152,7 @@ export function applyAction(t, actor, a) {
       if (!isCents(a.amount)) return deny('Enter an amount of chips to add.');
       const m = overMax(a.amount); if (m) return deny(m);
       p.balance += a.amount;
+      p.added += a.amount;
       logHand(p, 'rebuy', 0, a.amount);
       return { ok: true, delta: a.amount, balance: p.balance };
     }
@@ -151,7 +167,7 @@ export function applyAction(t, actor, a) {
       if (idx < 0) return deny('No hands to undo.');
       const h = t.history.splice(idx, 1)[0];
       const p = find(h.pid);
-      if (p) p.balance -= h.delta;                   // newest entry of that seat, so the balance can't go negative
+      if (p) { p.balance -= h.delta; if (h.outcome === 'rebuy') p.added = Math.max(0, p.added - h.delta); } // newest entry of that seat, so the balance can't go negative
       return { ok: true, entry: h, playerFound: !!p };
     }
     case 'remove': {                                 // host removes anyone; a player can only leave their own seat
@@ -163,7 +179,7 @@ export function applyAction(t, actor, a) {
     }
     case 'reset': {
       if (!host) return deny('Only the host can reset the table.');
-      t.players.forEach(p => { p.balance = p.start; });
+      t.players.forEach(p => { p.balance = p.start; p.added = 0; });
       t.history = [];
       return { ok: true };
     }
@@ -351,7 +367,7 @@ export class Room {
     if (!body || !validState(body.state)) return json({ error: 'bad state' }, 400);
     if (live.v !== 0) return json({ error: 'This table has already started.' }, 409);
     const seed = normalizeTable(Object.assign({}, body.state, {
-      players: body.state.players.map(p => ({ id: p.id, name: p.name, start: p.start, balance: p.balance })), // no owners
+      players: body.state.players.map(p => ({ id: p.id, name: p.name, start: p.start, balance: p.balance, added: p.added })), // no owners
     }));
     await this.state.storage.put('table', seed);
     await this.state.storage.put('meta', { token: live.token, v: 1, updated: now });

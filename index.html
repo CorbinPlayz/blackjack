@@ -90,6 +90,11 @@
   .adm-row button { min-height: 40px; padding: 6px 12px; font-size: 14px; }
   .adm-block { background: var(--red); color: #fff; }
   .mt { margin-top: 8px; }
+  .f3 { flex: 3; } .f1 { flex: 1; }
+  .f1 button { width: 100%; padding-left: 4px; padding-right: 4px; font-size: 14px; }
+  .sub { font-size: 12px; text-transform: uppercase; letter-spacing: .8px; color: var(--muted); margin: 14px 0 6px; }
+  .outcomes.two { grid-template-columns: 1fr 1fr; }
+  .outcomes.two button { min-height: 46px; font-size: 14px; }
   .badge { display: inline-block; margin-left: 8px; padding: 2px 8px; border-radius: 999px; background: var(--green); color: #04130a; font-size: 11px; font-weight: 800; letter-spacing: .6px; vertical-align: middle; }
   .player.mine { border-color: var(--green); }
   .player.view { opacity: .92; }
@@ -178,6 +183,11 @@
 </div>
 <div class="msg" id="toolMsg" role="status" style="margin:-6px 0 10px"></div>
 
+<div class="panel" id="standingsPanel" hidden>
+  <h2>Standings · net vs. buy-in</h2>
+  <div id="standings"></div>
+</div>
+
 <div id="players"></div>
 
 <div class="panel" id="historyPanel">
@@ -254,7 +264,7 @@ var Core = (function () {
   function addPlayer(name, startStr) {
     var chk = checkPlayer(name, startStr);
     if (!chk.ok) return chk;
-    var p = { id: state.nextId++, name: chk.name, start: chk.cents, balance: chk.cents };
+    var p = { id: state.nextId++, name: chk.name, start: chk.cents, balance: chk.cents, added: 0 };
     state.players.push(p);
     save();
     return { ok: true, player: p };
@@ -268,7 +278,7 @@ var Core = (function () {
   }
 
   function resetAll() {
-    state.players.forEach(function (p) { p.balance = p.start; });
+    state.players.forEach(function (p) { p.balance = p.start; p.added = 0; });
     state.history = [];
     save();
   }
@@ -294,6 +304,24 @@ var Core = (function () {
     return { ok: true, delta: delta, balance: p.balance };
   }
 
+  // Insurance: a side bet of half the main wager that pays 2:1 if the dealer has blackjack.
+  function insurance(id, wagerStr, result) {
+    var p = findPlayer(id);
+    if (!p) return { ok: false, error: 'Player not found.' };
+    var wc = checkWager(wagerStr);
+    if (!wc.ok) return wc;
+    if (result !== 'win' && result !== 'loss') return { ok: false, error: 'Unknown insurance result.' };
+    var side = Math.floor(wc.cents / 2);
+    if (side <= 0) return { ok: false, error: 'Wager is too small to insure.' };
+    if (wc.cents + side > p.balance) return { ok: false, error: 'Not enough chips to also insure (' + fmt(side) + ' on top of the bet).' };
+    var delta = result === 'win' ? side * 2 : -side;
+    p.balance += delta;
+    state.history.push({ id: state.nextHid++, pid: p.id, name: p.name, outcome: result === 'win' ? 'insurance_win' : 'insurance_loss', wager: side, delta: delta });
+    if (state.history.length > HISTORY_MAX) state.history.shift();
+    save();
+    return { ok: true, delta: delta, balance: p.balance };
+  }
+
   // Add chips to one player's stack. It is logged, so everyone can see it.
   function rebuy(id, amountStr) {
     var p = findPlayer(id);
@@ -301,6 +329,7 @@ var Core = (function () {
     var ac = checkAmount(amountStr);
     if (!ac.ok) return ac;
     p.balance += ac.cents;
+    p.added = (p.added || 0) + ac.cents;
     state.history.push({ id: state.nextHid++, pid: p.id, name: p.name, outcome: 'rebuy', wager: 0, delta: ac.cents });
     if (state.history.length > HISTORY_MAX) state.history.shift();
     save();
@@ -312,7 +341,7 @@ var Core = (function () {
     var h = state.history.pop();
     if (!h) return { ok: false, error: 'No hands to undo.' };
     var p = findPlayer(h.pid);
-    if (p) p.balance -= h.delta;
+    if (p) { p.balance -= h.delta; if (h.outcome === 'rebuy') p.added = Math.max(0, (p.added || 0) - h.delta); }
     save();
     return { ok: true, entry: h, playerFound: !!p };
   }
@@ -331,7 +360,7 @@ var Core = (function () {
       return p && typeof p.id === 'number' && typeof p.name === 'string' &&
              Number.isInteger(p.start) && Number.isInteger(p.balance);
     }).map(function (p) {
-      var q = { id: p.id, name: p.name, start: p.start, balance: p.balance };
+      var q = { id: p.id, name: p.name, start: p.start, balance: p.balance, added: Number.isInteger(p.added) && p.added > 0 ? p.added : 0 };
       if (typeof p.owner === 'string' && p.owner) q.owner = p.owner;     // which device sits at this seat (online only)
       return q;
     });
@@ -382,7 +411,7 @@ var Core = (function () {
 
   return {
     parseMoney: parseMoney, fmt: fmt, addPlayer: addPlayer, removePlayer: removePlayer,
-    resetAll: resetAll, settle: settle, rebuy: rebuy, undo: undo, load: load,
+    resetAll: resetAll, settle: settle, insurance: insurance, rebuy: rebuy, undo: undo, load: load,
     checkPlayer: checkPlayer, checkWager: checkWager, checkAmount: checkAmount,
     setReadOnly: setReadOnly, setSnapshot: setSnapshot, adopt: adopt, onChange: onChange,
     get state() { return state; }
@@ -435,7 +464,7 @@ var Core = (function () {
   var chipsText = {}, chipsOpen = {};
   var results = {};  // seat id -> {text, cls}
   var busy = false;  // ignore taps while a request is in flight (no double settles)
-  var LABEL = { win: 'Win', blackjack: 'Blackjack', push: 'Push', loss: 'Loss', rebuy: 'Added chips' };
+  var LABEL = { win: 'Win', blackjack: 'Blackjack', push: 'Push', loss: 'Loss', rebuy: 'Added chips', insurance_win: 'Insurance won', insurance_loss: 'Insurance lost' };
 
   /* online session: role 'host' (the dealer) or 'viewer' (a player at someone else's table) */
   var ONLINE_KEY = 'bjOnline.v1';
@@ -484,9 +513,30 @@ var Core = (function () {
     // keep the cursor where it was if a live update re-draws the cards while someone is typing
     var ae = typeof document.activeElement !== 'undefined' ? document.activeElement : null;
     var focusId = ae && ae.id && /^[wc]\d+$/.test(ae.id) ? ae.id : null;
+    renderStandings();
     renderPlayers();
     renderHistory();
     if (focusId && $(focusId)) { try { $(focusId).focus(); } catch (e) {} }
+  }
+
+  function renderStandings() {
+    var ps = Core.state.players.slice();
+    $('standingsPanel').hidden = ps.length < 2;
+    var box = $('standings'); box.innerHTML = '';
+    if (ps.length < 2) return;
+    ps.sort(function (a, b) { return b.balance - a.balance; });
+    ps.forEach(function (p, i) {
+      var net = p.balance - p.start - (p.added || 0);     // chips added later are not counted as winnings
+      var row = el('div', 'hist-row');
+      var who = el('div', 'who');
+      var nm = el('div', null, (i + 1) + '. ' + p.name);
+      if (!!myRef && p.owner === myRef) nm.appendChild(el('span', 'badge', 'YOU'));
+      who.appendChild(nm);
+      who.appendChild(el('div', 'what', Core.fmt(p.balance)));
+      row.appendChild(who);
+      row.appendChild(el('div', 'amt ' + (net > 0 ? 'pos' : net < 0 ? 'neg' : 'neu'), net === 0 ? 'Even' : signed(net)));
+      box.appendChild(row);
+    });
   }
 
   function renderPlayers() {
@@ -525,7 +575,14 @@ var Core = (function () {
         inp.setAttribute('inputmode', 'decimal'); inp.setAttribute('autocomplete', 'off');
         inp.placeholder = 'Wager $'; inp.setAttribute('data-wager', p.id);
         inp.value = wagers[p.id] || '';
-        wrap.appendChild(lab); wrap.appendChild(inp);
+        wrap.appendChild(lab);
+        var wrow = el('div', 'row');
+        var wcol = el('div', 'f3'); wcol.appendChild(inp);
+        var dcol = el('div', 'f1');
+        var db = el('button', 'btn-ghost', 'Double ×2'); db.type = 'button'; db.setAttribute('data-action', 'double');
+        dcol.appendChild(db);
+        wrow.appendChild(wcol); wrow.appendChild(dcol);
+        wrap.appendChild(wrow);
         card.appendChild(wrap);
 
         var grid = el('div', 'outcomes');
@@ -543,13 +600,22 @@ var Core = (function () {
         var det = el('details', 'chips');
         det.open = !!chipsOpen[p.id];
         det.addEventListener('toggle', function () { chipsOpen[p.id] = det.open; });
-        det.appendChild(el('summary', null, 'Add chips'));
+        det.appendChild(el('summary', null, 'More: add chips, insurance'));
+        det.appendChild(el('div', 'sub', 'Add chips'));
         var crow = el('div', 'row mt');
         var cin = el('input'); cin.type = 'text'; cin.id = 'c' + p.id; cin.placeholder = 'Chips $';
         cin.setAttribute('inputmode', 'decimal'); cin.setAttribute('autocomplete', 'off'); cin.setAttribute('data-chips', p.id);
         cin.value = chipsText[p.id] || '';
         var cb = el('button', 'btn-ghost', 'Add'); cb.type = 'button'; cb.setAttribute('data-action', 'rebuy');
         crow.appendChild(cin); crow.appendChild(cb); det.appendChild(crow);
+        det.appendChild(el('div', 'sub', 'Insurance (half the wager above, pays 2:1)'));
+        var ins = el('div', 'outcomes two');
+        [['win', 'Insurance won'], ['loss', 'Insurance lost']].forEach(function (o) {
+          var b = el('button', 'btn-ghost', o[1]); b.type = 'button';
+          b.setAttribute('data-action', 'insure'); b.setAttribute('data-result', o[0]);
+          ins.appendChild(b);
+        });
+        det.appendChild(ins);
         card.appendChild(det);
       }
       listEl.appendChild(card);
@@ -566,6 +632,7 @@ var Core = (function () {
       var who = el('div', 'who');
       who.appendChild(el('div', null, e.name));
       who.appendChild(el('div', 'what', e.outcome === 'rebuy' ? 'Added chips'
+        : e.outcome.indexOf('insurance') === 0 ? (LABEL[e.outcome] || e.outcome) + ' · side bet ' + Core.fmt(e.wager)
         : (LABEL[e.outcome] || e.outcome) + ' · bet ' + Core.fmt(e.wager)));
       row.appendChild(who);
       row.appendChild(el('div', 'amt ' + (e.delta > 0 ? 'pos' : e.delta < 0 ? 'neg' : 'neu'),
@@ -580,6 +647,7 @@ var Core = (function () {
       case 'add': return Core.addPlayer(a.name, a.startText);
       case 'settle': return Core.settle(a.pid, a.wagerText, a.outcome);
       case 'rebuy': return Core.rebuy(a.pid, a.amountText);
+      case 'insure': return Core.insurance(a.pid, a.wagerText, a.result);
       case 'remove': return { ok: Core.removePlayer(a.pid) };
       case 'undo': return Core.undo();
       case 'reset': Core.resetAll(); return { ok: true };
@@ -597,6 +665,10 @@ var Core = (function () {
       case 'settle':
         c = Core.checkWager(a.wagerText); if (!c.ok) return c;
         body = { type: 'settle', pid: a.pid, wager: c.cents, outcome: a.outcome };
+        break;
+      case 'insure':
+        c = Core.checkWager(a.wagerText); if (!c.ok) return c;
+        body = { type: 'insurance', pid: a.pid, wager: c.cents, result: a.result };
         break;
       case 'rebuy':
         c = Core.checkAmount(a.amountText); if (!c.ok) return c;
@@ -727,6 +799,28 @@ var Core = (function () {
                   : label + ': balance unchanged';
           results[id] = { text: txt, cls: res.delta > 0 ? 'pos' : res.delta < 0 ? 'neg' : 'neu' };
         }
+        render();
+        return;
+      }
+
+      if (action === 'double') {
+        var cur = null;
+        Core.state.players.forEach(function (x) { if (x.id === id) cur = x; });
+        var dw = Core.checkWager(card.querySelector('input[data-wager]').value);
+        if (!dw.ok) results[id] = { text: dw.error, cls: 'err' };
+        else if (cur && dw.cents * 2 > cur.balance) results[id] = { text: 'Doubled wager (' + Core.fmt(dw.cents * 2) + ') is more than balance (' + Core.fmt(cur.balance) + ').', cls: 'err' };
+        else { wagers[id] = String(dw.cents * 2 / 100); results[id] = { text: 'Wager doubled to ' + Core.fmt(dw.cents * 2) + '.', cls: 'neu' }; }
+        render();
+        return;
+      }
+
+      if (action === 'insure') {
+        var iresult = btn.getAttribute('data-result');
+        var itext = card.querySelector('input[data-wager]').value;
+        wagers[id] = itext;
+        var ir = await perform({ type: 'insure', pid: id, wagerText: itext, result: iresult });
+        if (!ir.ok) results[id] = { text: ir.error, cls: 'err' };
+        else results[id] = { text: 'Insurance ' + (iresult === 'win' ? 'won' : 'lost') + ': ' + signed(ir.delta), cls: ir.delta > 0 ? 'pos' : 'neg' };
         render();
         return;
       }
