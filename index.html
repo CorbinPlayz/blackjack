@@ -296,7 +296,10 @@
   <div id="history"></div>
 </div>
 
-<button type="button" class="btn-ghost" id="fxBtn" style="width:100%;margin-bottom:10px">Effects: On</button>
+<div class="row" style="margin-bottom:10px">
+  <button type="button" class="btn-ghost" id="fxBtn" style="flex:1">Effects: On</button>
+  <button type="button" class="btn-ghost" id="sndBtn" style="flex:1">Sound: On</button>
+</div>
 <button type="button" class="btn-ghost" id="adminBtn" style="width:100%" hidden>Admin</button>
 <div class="panel" id="adminPanel" hidden style="margin-top:14px">
   <h2>Admin · who can use this app</h2>
@@ -811,6 +814,77 @@ var Core = (function () {
     requestAnimationFrame(step);
   }
 
+  /* ---------- sound: tiny synth, no audio files. Starts after the first tap (phone browsers require that) ---------- */
+  var SND_KEY = 'bjSnd.v1', actx = null;
+  function sndOn() { return lsGet(SND_KEY) !== '0'; }
+  function audio() {
+    if (!sndOn()) return null;
+    try {
+      if (!actx) { var AC = window.AudioContext || window.webkitAudioContext; if (!AC) return null; actx = new AC(); }
+      if (actx.state === 'suspended' && actx.resume) actx.resume();
+      return actx;
+    } catch (e) { return null; }
+  }
+  function tone(freq, at, dur, type, vol, slideTo) {
+    var a = audio(); if (!a) return;
+    try {
+      var t = a.currentTime + at, o = a.createOscillator(), g = a.createGain();
+      o.type = type || 'sine'; o.frequency.setValueAtTime(freq, t);
+      if (slideTo) o.frequency.exponentialRampToValueAtTime(slideTo, t + dur);
+      g.gain.setValueAtTime(0.0001, t); g.gain.exponentialRampToValueAtTime(vol || 0.18, t + 0.015); g.gain.exponentialRampToValueAtTime(0.0001, t + dur);
+      o.connect(g); g.connect(a.destination); o.start(t); o.stop(t + dur + 0.05);
+    } catch (e) {}
+  }
+  var N = { C4: 261.6, G4: 392, C5: 523.3, D5: 587.3, E5: 659.3, G5: 784, A5: 880, C6: 1046.5, E6: 1318.5, G6: 1568 };
+  function sfx(name) {
+    if (!sndOn()) return;
+    var i;
+    switch (name) {
+      case 'click': tone(1100, 0, 0.04, 'square', 0.05); break;
+      case 'win': [N.C5, N.E5, N.G5, N.C6].forEach(function (f, k) { tone(f, k * 0.08, 0.22, 'triangle', 0.2); }); break;
+      case 'big':
+        [N.C5, N.E5, N.G5, N.C6, N.E6, N.G6].forEach(function (f, k) { tone(f, k * 0.075, 0.3, 'triangle', 0.2); });
+        [N.C5, N.E5, N.G5].forEach(function (f) { tone(f, 0.5, 0.9, 'sine', 0.12); });
+        for (i = 0; i < 10; i++) tone(rnd(1500, 3200), 0.4 + i * 0.07, 0.08, 'sine', 0.06);
+        break;
+      case 'blackjack':
+        [N.G4, N.C5, N.E5, N.G5].forEach(function (f, k) { tone(f, k * 0.11, 0.2, 'sawtooth', 0.09); });
+        [N.C5, N.E5, N.G5, N.C6].forEach(function (f) { tone(f, 0.46, 1.1, 'triangle', 0.14); });
+        for (i = 0; i < 14; i++) tone(rnd(1800, 3600), 0.3 + i * 0.06, 0.07, 'sine', 0.06);
+        break;
+      case 'loss': tone(330, 0, 0.28, 'sawtooth', 0.09, 250); tone(247, 0.22, 0.4, 'sawtooth', 0.09, 150); break;
+      case 'push': tone(440, 0, 0.12, 'sine', 0.14); tone(440, 0.16, 0.12, 'sine', 0.14); break;
+      case 'coin': tone(N.G6, 0, 0.09, 'square', 0.06); tone(2093, 0.07, 0.25, 'square', 0.06); break;
+      case 'ding': tone(N.E6, 0, 0.35, 'sine', 0.13); break;
+      case 'streak': [N.C5, N.D5, N.E5, N.G5, N.A5, N.C6].forEach(function (f, k) { tone(f, 0.5 + k * 0.06, 0.15, 'square', 0.07); }); break;
+      case 'lead': tone(N.G5, 0, 0.14, 'triangle', 0.16); tone(N.C6, 0.12, 0.3, 'triangle', 0.16); break;
+    }
+  }
+  function soundFor(e, quiet) {
+    var o = e.outcome;
+    if (o === 'blackjack') sfx(quiet ? 'ding' : 'blackjack');
+    else if (o === 'win' || o === 'insurance_win') sfx(quiet ? 'ding' : (isBigWin(e) ? 'big' : 'win'));
+    else if (!quiet && (o === 'loss' || o === 'insurance_loss')) sfx('loss');
+    else if (!quiet && o === 'push') sfx('push');
+    else if (o === 'rebuy') sfx('coin');
+    if (!quiet && (o === 'win' || o === 'blackjack') && streakOf(e) >= 3) sfx('streak');
+  }
+  function applySndBtn() { $('sndBtn').textContent = 'Sound: ' + (sndOn() ? 'On' : 'Off'); }
+  $('sndBtn').addEventListener('click', function (e) {
+    e.preventDefault();
+    lsSet(SND_KEY, sndOn() ? '0' : '1');
+    applySndBtn();
+    if (sndOn()) { audio(); sfx('win'); }
+  });
+  applySndBtn();
+  try {
+    if (document.addEventListener) document.addEventListener('click', function (e) {   // first tap unlocks audio; buttons click
+      audio();
+      var b = e.target && e.target.closest ? e.target.closest('button') : null;
+      if (b && b.id !== 'sndBtn') sfx('click');
+    }, true);
+  } catch (e) {}
+
   var prevBal = {}, seenHid = null, shownIds = {}, stackN = {}, prevLeader;
   function lastEntry() { var h = Core.state.history; return h.length ? h[h.length - 1] : null; }
   function markSeen() { var e = lastEntry(); seenHid = e ? e.id : 0; }
@@ -840,7 +914,7 @@ var Core = (function () {
     var lead = ps.length > 1 && ps[0].balance > ps[1].balance ? ps[0] : null;
     if (prevLeader !== undefined && lead && lead.id !== prevLeader && fxEnabled()) {
       var pt = originFor(lead.id);
-      toast('👑 ' + lead.name + ' takes the lead!');
+      toast('👑 ' + lead.name + ' takes the lead!'); sfx('lead');
       burst(pt.x, pt.y, 'gold', 36); ring(pt.x, pt.y, '#f5d76e');
     }
     if (ps.length > 1) prevLeader = lead ? lead.id : null; else prevLeader = undefined;
@@ -853,6 +927,7 @@ var Core = (function () {
     var now = Date.now();
     if (shownIds[e.id] && now - shownIds[e.id] < 6000) return;
     shownIds[e.id] = now;
+    soundFor(e, quiet);
     if (!fxEnabled()) return;
     var o = e.outcome, pt = originFor(e.pid);
     if (o === 'blackjack') {
@@ -1090,10 +1165,13 @@ var Core = (function () {
         wrap.appendChild(lab);
         var wrow = el('div', 'row');
         var wcol = el('div', 'f3'); wcol.appendChild(inp);
+        var hcol = el('div', 'f1');
+        var hb = el('button', 'btn-ghost', '½'); hb.type = 'button'; hb.setAttribute('data-action', 'half');
+        hcol.appendChild(hb);
         var dcol = el('div', 'f1');
-        var db = el('button', 'btn-ghost', 'Double ×2'); db.type = 'button'; db.setAttribute('data-action', 'double');
+        var db = el('button', 'btn-ghost', '×2'); db.type = 'button'; db.setAttribute('data-action', 'double');
         dcol.appendChild(db);
-        wrow.appendChild(wcol); wrow.appendChild(dcol);
+        wrow.appendChild(wcol); wrow.appendChild(hcol); wrow.appendChild(dcol);
         wrap.appendChild(wrow);
         card.appendChild(wrap);
 
@@ -1322,6 +1400,15 @@ var Core = (function () {
         if (!dw.ok) results[id] = { text: dw.error, cls: 'err' };
         else if (cur && dw.cents * 2 > cur.balance) results[id] = { text: 'Doubled wager (' + Core.fmt(dw.cents * 2) + ') is more than balance (' + Core.fmt(cur.balance) + ').', cls: 'err' };
         else { wagers[id] = String(dw.cents * 2 / 100); results[id] = { text: 'Wager doubled to ' + Core.fmt(dw.cents * 2) + '.', cls: 'neu' }; }
+        render();
+        return;
+      }
+
+      if (action === 'half') {
+        var hw = Core.checkWager(card.querySelector('input[data-wager]').value);
+        if (!hw.ok) results[id] = { text: hw.error, cls: 'err' };
+        else if (Math.floor(hw.cents / 2) < 1) results[id] = { text: 'That wager is already the smallest possible.', cls: 'err' };
+        else { var hc = Math.floor(hw.cents / 2); wagers[id] = String(hc / 100); results[id] = { text: 'Wager halved to ' + Core.fmt(hc) + '.', cls: 'neu' }; }
         render();
         return;
       }

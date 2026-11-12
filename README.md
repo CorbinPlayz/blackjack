@@ -7,9 +7,10 @@ Every player bets alone against the dealer; there is no shared pot.
 - Wagers larger than a player's balance are rejected.
 - Recent hands list, **Undo Last Hand**, **Add chips** (logged), add/remove players, reset balances.
 - **Standings**: ranked by balance with net profit vs. buy-in (chips added later are not counted as winnings).
-- **Double x2** button for the wager box (checks your balance). Splits are just two separate hands.
+- **½** and **×2** buttons for the wager box (×2 checks your balance; ½ rounds down to the cent). Splits are just two separate hands.
 - **Insurance**: side bet of half the wager, pays 2:1; needs enough chips for the bet plus the side bet.
 - Works offline on one phone (saved in the browser).
+- **Sound**: synthesized in the browser (no audio files): button clicks, win jingle, big-win and blackjack fanfares, a sad loss sound, a coin clink for added chips, and a ding when other players win. Phones only allow audio after the first tap, so it starts then. Mute it with the **Sound** button (silent-mode switch on iPhone also mutes it).
 - **Effects**: spinning 3D chip in the header, a 3D chip stack on every player that grows and shrinks with their balance, balances that count up/down with a floating +/- amount, confetti on wins, a red flash and shake on losses, and a full-screen 3D card flip with gold chip rain on Blackjack. When someone else wins at an online table you get a pop-up banner; when the host settles *your* hand you get the celebration. Mouse/trackpad users also get a 3D tilt on cards. Turn it all off with the **Effects** button (it also turns itself off if the phone has Reduce Motion on). Big hands get fireworks, expanding shockwave rings, screen shake and a BIG WIN scene with a giant spinning chip; win streaks (3+) set the card on fire, passing the leader announces the new lead, and drifting card suits float in the background. Effects never change any chip math.
 
 ## Online table (host + players)
