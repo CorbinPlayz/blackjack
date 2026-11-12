@@ -73,7 +73,8 @@ export function normalizeTable(t) {
     players, history,
     nextId: Math.max(typeof t.nextId === 'number' ? t.nextId : 1, maxId + 1),
     nextHid: Math.max(typeof t.nextHid === 'number' ? t.nextHid : 1, maxHid + 1),
-    settings: { locked: st.locked === true, maxBuyin: isCents(st.maxBuyin) ? st.maxBuyin : 0 },
+    settings: { locked: st.locked === true, maxBuyin: isCents(st.maxBuyin) ? st.maxBuyin : 0,
+      bankFee: Number.isInteger(st.bankFee) && st.bankFee >= 0 && st.bankFee <= 50 ? st.bankFee : 10 },   // % kept by the bank when chips are added
   };
 }
 
@@ -151,10 +152,13 @@ export function applyAction(t, actor, a) {
       if (!may(p)) return deny(NOT_YOURS);
       if (!isCents(a.amount)) return deny('Enter an amount of chips to add.');
       const m = overMax(a.amount); if (m) return deny(m);
-      p.balance += a.amount;
-      p.added += a.amount;
-      logHand(p, 'rebuy', 0, a.amount);
-      return { ok: true, delta: a.amount, balance: p.balance };
+      const fee = Math.ceil(a.amount * t.settings.bankFee / 100);   // taking chips from the bank costs a fee
+      const got = a.amount - fee;
+      if (got < 1) return deny('Too small: the ' + t.settings.bankFee + '% bank fee would take all of it.');
+      p.balance += got;
+      p.added += a.amount;                                  // you took the full amount out, so the fee shows up as a loss
+      logHand(p, 'rebuy', fee, got);                        // wager column = the fee
+      return { ok: true, delta: got, fee, balance: p.balance };
     }
     case 'undo': {
       let idx = -1;
@@ -167,7 +171,7 @@ export function applyAction(t, actor, a) {
       if (idx < 0) return deny('No hands to undo.');
       const h = t.history.splice(idx, 1)[0];
       const p = find(h.pid);
-      if (p) { p.balance -= h.delta; if (h.outcome === 'rebuy') p.added = Math.max(0, p.added - h.delta); } // newest entry of that seat, so the balance can't go negative
+      if (p) { p.balance -= h.delta; if (h.outcome === 'rebuy') p.added = Math.max(0, p.added - h.delta - h.wager); } // newest entry of that seat, so the balance can't go negative
       return { ok: true, entry: h, playerFound: !!p };
     }
     case 'remove': {                                 // host removes anyone; a player can only leave their own seat
@@ -189,6 +193,10 @@ export function applyAction(t, actor, a) {
       if (a.maxBuyin !== undefined) {
         if (!Number.isInteger(a.maxBuyin) || a.maxBuyin < 0 || a.maxBuyin > MAX_CENTS) return deny('Bad max buy-in.');
         t.settings.maxBuyin = a.maxBuyin;
+      }
+      if (a.bankFee !== undefined) {
+        if (!Number.isInteger(a.bankFee) || a.bankFee < 0 || a.bankFee > 50) return deny('Bank fee must be a whole number from 0 to 50.');
+        t.settings.bankFee = a.bankFee;
       }
       return { ok: true };
     }

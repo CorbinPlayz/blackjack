@@ -284,6 +284,16 @@
 </div>
 <div class="msg" id="toolMsg" role="status" style="margin:-6px 0 10px"></div>
 
+<div class="panel" id="rulesPanel">
+  <h2>Bank fee</h2>
+  <div class="online-status" id="feeInfo">Taking chips from the bank costs a fee. Chips you take count against your net profit.</div>
+  <div class="row">
+    <div style="flex:2"><input type="text" id="bankFee" placeholder="Fee % (0 to 50)" inputmode="numeric" autocomplete="off"></div>
+    <div style="flex:1"><button type="button" class="btn-ghost" id="bankFeeBtn" style="width:100%">Set fee</button></div>
+  </div>
+  <div class="msg" id="feeMsg" role="status"></div>
+</div>
+
 <div class="panel" id="standingsPanel" hidden>
   <h2>Standings · net vs. buy-in</h2>
   <div id="standings"></div>
@@ -340,7 +350,7 @@ var Core = (function () {
   var readOnly = false;      // viewer mode: never saves, never notifies
   var listeners = [];
 
-  function fresh() { return { players: [], nextId: 1, history: [], nextHid: 1, settings: { locked: false, maxBuyin: 0 } }; }
+  function fresh() { return { players: [], nextId: 1, history: [], nextHid: 1, settings: { locked: false, maxBuyin: 0, bankFee: 10 } }; }
 
   function parseMoney(str) {
     if (typeof str !== 'string') return null;
@@ -451,12 +461,20 @@ var Core = (function () {
     if (!p) return { ok: false, error: 'Player not found.' };
     var ac = checkAmount(amountStr);
     if (!ac.ok) return ac;
-    p.balance += ac.cents;
-    p.added = (p.added || 0) + ac.cents;
-    state.history.push({ id: state.nextHid++, pid: p.id, name: p.name, outcome: 'rebuy', wager: 0, delta: ac.cents });
+    var fee = Math.ceil(ac.cents * state.settings.bankFee / 100);     // taking chips from the bank costs a fee
+    var got = ac.cents - fee;
+    if (got < 1) return { ok: false, error: 'Too small: the ' + state.settings.bankFee + '% bank fee would take all of it.' };
+    p.balance += got;
+    p.added = (p.added || 0) + ac.cents;                               // you took the full amount out, so the fee shows up as a loss
+    state.history.push({ id: state.nextHid++, pid: p.id, name: p.name, outcome: 'rebuy', wager: fee, delta: got });
     if (state.history.length > HISTORY_MAX) state.history.shift();
     save();
-    return { ok: true, delta: ac.cents, balance: p.balance };
+    return { ok: true, delta: got, fee: fee, balance: p.balance };
+  }
+  function setBankFee(n) {
+    if (!Number.isInteger(n) || n < 0 || n > 50) return { ok: false, error: 'Bank fee must be a whole number from 0 to 50.' };
+    state.settings.bankFee = n; save();
+    return { ok: true };
   }
 
   // Reverse the most recent settled hand (only that player's balance is touched).
@@ -464,7 +482,7 @@ var Core = (function () {
     var h = state.history.pop();
     if (!h) return { ok: false, error: 'No hands to undo.' };
     var p = findPlayer(h.pid);
-    if (p) { p.balance -= h.delta; if (h.outcome === 'rebuy') p.added = Math.max(0, (p.added || 0) - h.delta); }
+    if (p) { p.balance -= h.delta; if (h.outcome === 'rebuy') p.added = Math.max(0, (p.added || 0) - h.delta - h.wager); }
     save();
     return { ok: true, entry: h, playerFound: !!p };
   }
@@ -488,7 +506,8 @@ var Core = (function () {
       return q;
     });
     var st = s.settings && typeof s.settings === 'object' ? s.settings : {};
-    out.settings = { locked: st.locked === true, maxBuyin: Number.isInteger(st.maxBuyin) && st.maxBuyin > 0 ? st.maxBuyin : 0 };
+    out.settings = { locked: st.locked === true, maxBuyin: Number.isInteger(st.maxBuyin) && st.maxBuyin > 0 ? st.maxBuyin : 0,
+      bankFee: Number.isInteger(st.bankFee) && st.bankFee >= 0 && st.bankFee <= 50 ? st.bankFee : 10 };
     var hist = Array.isArray(s.history) ? s.history : [];
     out.history = hist.filter(function (h) {
       return h && typeof h.id === 'number' && typeof h.pid === 'number' && typeof h.name === 'string' &&
@@ -518,7 +537,7 @@ var Core = (function () {
     var n = normalize(s);
     if (!n) return false;
     n.players.forEach(function (p) { delete p.owner; });
-    n.settings = { locked: false, maxBuyin: 0 };
+    n.settings = { locked: false, maxBuyin: 0, bankFee: n.settings.bankFee };
     readOnly = false;
     state = n;
     save();
@@ -534,7 +553,7 @@ var Core = (function () {
 
   return {
     parseMoney: parseMoney, fmt: fmt, addPlayer: addPlayer, removePlayer: removePlayer,
-    resetAll: resetAll, settle: settle, insurance: insurance, rebuy: rebuy, undo: undo, load: load,
+    resetAll: resetAll, settle: settle, insurance: insurance, rebuy: rebuy, setBankFee: setBankFee, undo: undo, load: load,
     checkPlayer: checkPlayer, checkWager: checkWager, checkAmount: checkAmount,
     setReadOnly: setReadOnly, setSnapshot: setSnapshot, adopt: adopt, onChange: onChange,
     get state() { return state; }
@@ -986,6 +1005,7 @@ var Core = (function () {
       if (e.outcome === 'blackjack') toast('🃏 ' + e.name + ' hit Blackjack! ' + signed(e.delta));
       else if (e.outcome === 'win' || e.outcome === 'insurance_win') toast('🎉 ' + e.name + ' won ' + signed(e.delta));
       else if (e.outcome === 'loss' || e.outcome === 'insurance_loss') toast('💸 ' + e.name + ' lost ' + Core.fmt(-e.delta));
+      else if (e.outcome === 'rebuy' && e.wager > 0) toast('🏧 ' + e.name + ' raided the bank for ' + Core.fmt(e.delta + e.wager) + ' (fee ' + Core.fmt(e.wager) + ')');
       celebrateEntry(e, true);
     });
   }
@@ -1072,6 +1092,8 @@ var Core = (function () {
     nameEl.placeholder = pr ? 'Your name' : 'Name';
     $('toolbar').hidden = pr && (!seat || locked);
     $('resetBtn').hidden = pr;
+    $('rulesPanel').hidden = pr;
+    $('feeInfo').textContent = 'Taking chips from the bank costs a ' + Core.state.settings.bankFee + '% fee, and chips taken count against net profit.';
     $('undoBtn').textContent = pr ? 'Undo my last hand' : 'Undo Last Hand';
     toolMsg.hidden = $('toolbar').hidden;
     $('hostTools').hidden = online.role !== 'host';
@@ -1103,7 +1125,7 @@ var Core = (function () {
       if (!!myRef && p.owner === myRef) nm.appendChild(el('span', 'badge', 'YOU'));
       if (i === 0 && p.balance > ps[1].balance) nm.appendChild(el('span', 'crown', '👑'));
       who.appendChild(nm);
-      who.appendChild(el('div', 'what', Core.fmt(p.balance)));
+      who.appendChild(el('div', 'what', Core.fmt(p.balance) + (p.added > 0 ? ' · took ' + Core.fmt(p.added) + ' from the bank' : '')));
       row.appendChild(who);
       row.appendChild(el('div', 'amt ' + (net > 0 ? 'pos' : net < 0 ? 'neg' : 'neu'), net === 0 ? 'Even' : signed(net)));
       box.appendChild(row);
@@ -1191,12 +1213,12 @@ var Core = (function () {
         det.open = !!chipsOpen[p.id];
         det.addEventListener('toggle', function () { chipsOpen[p.id] = det.open; });
         det.appendChild(el('summary', null, 'More: add chips, insurance'));
-        det.appendChild(el('div', 'sub', 'Add chips'));
+        det.appendChild(el('div', 'sub', 'Take chips from the bank (' + Core.state.settings.bankFee + '% fee)'));
         var crow = el('div', 'row mt');
         var cin = el('input'); cin.type = 'text'; cin.id = 'c' + p.id; cin.placeholder = 'Chips $';
         cin.setAttribute('inputmode', 'decimal'); cin.setAttribute('autocomplete', 'off'); cin.setAttribute('data-chips', p.id);
         cin.value = chipsText[p.id] || '';
-        var cb = el('button', 'btn-ghost', 'Add'); cb.type = 'button'; cb.setAttribute('data-action', 'rebuy');
+        var cb = el('button', 'btn-ghost', 'Take'); cb.type = 'button'; cb.setAttribute('data-action', 'rebuy');
         crow.appendChild(cin); crow.appendChild(cb); det.appendChild(crow);
         det.appendChild(el('div', 'sub', 'Insurance (half the wager above, pays 2:1)'));
         var ins = el('div', 'outcomes two');
@@ -1221,7 +1243,7 @@ var Core = (function () {
       var row = el('div', 'hist-row');
       var who = el('div', 'who');
       who.appendChild(el('div', null, e.name));
-      who.appendChild(el('div', 'what', e.outcome === 'rebuy' ? 'Added chips'
+      who.appendChild(el('div', 'what', e.outcome === 'rebuy' ? (e.wager > 0 ? 'Bank: took ' + Core.fmt(e.delta + e.wager) + ' · fee ' + Core.fmt(e.wager) : 'Added chips')
         : e.outcome.indexOf('insurance') === 0 ? (LABEL[e.outcome] || e.outcome) + ' · side bet ' + Core.fmt(e.wager)
         : (LABEL[e.outcome] || e.outcome) + ' · bet ' + Core.fmt(e.wager)));
       row.appendChild(who);
@@ -1237,6 +1259,7 @@ var Core = (function () {
       case 'add': return Core.addPlayer(a.name, a.startText);
       case 'settle': return Core.settle(a.pid, a.wagerText, a.outcome);
       case 'rebuy': return Core.rebuy(a.pid, a.amountText);
+      case 'settings': return a.settings && a.settings.bankFee !== undefined ? Core.setBankFee(a.settings.bankFee) : { ok: true };
       case 'insure': return Core.insurance(a.pid, a.wagerText, a.result);
       case 'remove': return { ok: Core.removePlayer(a.pid) };
       case 'undo': return Core.undo();
@@ -1429,7 +1452,10 @@ var Core = (function () {
         chipsText[id] = amountText;
         var rb = await perform({ type: 'rebuy', pid: id, amountText: amountText });
         if (!rb.ok) { results[id] = { text: rb.error, cls: 'err' }; }
-        else { chipsText[id] = ''; results[id] = { text: 'Added ' + Core.fmt(rb.delta) + ' in chips', cls: 'pos' }; }
+        else {
+          chipsText[id] = '';
+          results[id] = { text: rb.fee ? 'Took ' + Core.fmt(rb.delta + rb.fee) + ' from the bank. Fee ' + Core.fmt(rb.fee) + ', so you got ' + Core.fmt(rb.delta) + '.' : 'Added ' + Core.fmt(rb.delta) + ' in chips', cls: 'neu' };
+        }
         if (rb.ok) renderLocal(); else render();
       }
     } finally { busy = false; }
@@ -1570,6 +1596,19 @@ var Core = (function () {
       var res = await perform({ type: 'settings', settings: { locked: !paused() } });
       setOnlineMsg(res.ok ? (paused() ? 'Players are paused. They can watch but not change anything.' : 'Players can play again.') : res.error, res.ok);
       render();
+    } finally { busy = false; }
+  });
+  $('bankFeeBtn').addEventListener('click', async function (e) {
+    e.preventDefault();
+    if (busy || isPlayer()) return;
+    var txt = $('bankFee').value.trim();
+    if (!/^\d{1,2}$/.test(txt)) { $('feeMsg').textContent = 'Enter a whole number from 0 to 50.'; $('feeMsg').className = 'msg'; return; }
+    busy = true;
+    try {
+      var res = await perform({ type: 'settings', settings: { bankFee: parseInt(txt, 10) } });
+      $('feeMsg').textContent = res.ok ? 'Bank fee is now ' + parseInt(txt, 10) + '%.' : res.error;
+      $('feeMsg').className = 'msg' + (res.ok ? ' ok' : '');
+      if (res.ok) { $('bankFee').value = ''; render(); }
     } finally { busy = false; }
   });
   $('maxBuyinBtn').addEventListener('click', async function (e) {

@@ -8,6 +8,7 @@ Every player bets alone against the dealer; there is no shared pot.
 - Recent hands list, **Undo Last Hand**, **Add chips** (logged), add/remove players, reset balances.
 - **Standings**: ranked by balance with net profit vs. buy-in (chips added later are not counted as winnings).
 - **½** and **×2** buttons for the wager box (×2 checks your balance; ½ rounds down to the cent). Splits are just two separate hands.
+- **Bank fee**: taking chips from the bank mid-game costs a fee (default 10%, host can set 0 to 50%). You receive the amount minus the fee, the full amount counts as chips taken (so the fee is a real loss in net profit), the standings show how much each player took from the bank, and everyone sees a "raided the bank" banner. Starting buy-ins are not charged.
 - **Insurance**: side bet of half the wager, pays 2:1; needs enough chips for the bet plus the side bet.
 - Works offline on one phone (saved in the browser).
 - **Sound**: synthesized in the browser (no audio files): button clicks, win jingle, big-win and blackjack fanfares, a sad loss sound, a coin clink for added chips, and a ding when other players win. Phones only allow audio after the first tap, so it starts then. Mute it with the **Sound** button (silent-mode switch on iPhone also mutes it).
