@@ -32,9 +32,152 @@ export function validState(s) {
   if (!s || typeof s !== 'object' || !Array.isArray(s.players)) return false;
   if (s.players.length > 100) return false;
   if (s.history !== undefined && (!Array.isArray(s.history) || s.history.length > 200)) return false;
-  return s.players.every(p =>
+  const playersOk = s.players.every(p =>
     p && typeof p.id === 'number' && typeof p.name === 'string' && p.name.length <= 60 &&
     Number.isInteger(p.start) && Number.isInteger(p.balance));
+  const historyOk = (s.history || []).every(h =>
+    h && Number.isInteger(h.id) && Number.isInteger(h.pid) && typeof h.name === 'string' && typeof h.outcome === 'string' &&
+    Number.isInteger(h.wager) && Number.isInteger(h.delta));
+  return playersOk && historyOk;
+}
+
+/* ================= TABLE RULES =================
+   The server is the referee. Everyone (host and players) sends "actions"; this function decides.
+   Every player bets alone against the dealer: an action only ever changes the seat it names.
+   actor = { role: 'host' | 'player', ref: <public id of the acting device> }                  */
+const HISTORY_MAX = 100;
+const MAX_CENTS = 100000000000;
+const isCents = n => Number.isInteger(n) && n > 0 && n <= MAX_CENTS;
+
+function fmt(cents) {
+  const neg = cents < 0; if (neg) cents = -cents;
+  const dollars = Math.floor(cents / 100), rem = cents % 100;
+  const d = String(dollars).replace(/\B(?=(\d{3})+(?!\d))/g, ',');
+  return (neg ? '-' : '') + '$' + d + (rem ? '.' + (rem < 10 ? '0' : '') + rem : '');
+}
+
+export function normalizeTable(t) {
+  t = t && typeof t === 'object' ? t : {};
+  const players = (Array.isArray(t.players) ? t.players : []).map(p => {
+    const q = { id: p.id, name: String(p.name), start: p.start, balance: p.balance };
+    if (typeof p.owner === 'string' && p.owner) q.owner = p.owner;
+    return q;
+  });
+  const history = (Array.isArray(t.history) ? t.history : []).map(h => ({
+    id: h.id, pid: h.pid, name: String(h.name), outcome: String(h.outcome), wager: h.wager, delta: h.delta }));
+  const maxId = players.reduce((m, p) => Math.max(m, p.id), 0);
+  const maxHid = history.reduce((m, h) => Math.max(m, h.id), 0);
+  const st = t.settings && typeof t.settings === 'object' ? t.settings : {};
+  return {
+    players, history,
+    nextId: Math.max(typeof t.nextId === 'number' ? t.nextId : 1, maxId + 1),
+    nextHid: Math.max(typeof t.nextHid === 'number' ? t.nextHid : 1, maxHid + 1),
+    settings: { locked: st.locked === true, maxBuyin: isCents(st.maxBuyin) ? st.maxBuyin : 0 },
+  };
+}
+
+function cleanName(n) { return String(n || '').replace(/[\u0000-\u001f<>]/g, '').trim().slice(0, 30); }
+
+export function applyAction(t, actor, a) {
+  const host = actor.role === 'host';
+  const deny = error => ({ ok: false, error });
+  const mine = p => !!actor.ref && p.owner === actor.ref;
+  const find = id => t.players.find(p => p.id === id);
+  const may = p => host || mine(p);                 // players may only touch their own seat
+  const NOT_YOURS = 'You can only change your own chips.';
+  if (!a || typeof a !== 'object') return deny('Unknown action.');
+  if (!host && t.settings.locked) return deny('The host has paused the table.');
+  const logHand = (p, outcome, wager, delta) => {
+    t.history.push({ id: t.nextHid++, pid: p.id, name: p.name, outcome, wager, delta });
+    if (t.history.length > HISTORY_MAX) t.history.shift();
+  };
+  const overMax = c => t.settings.maxBuyin && c > t.settings.maxBuyin ? 'The host set a max of ' + fmt(t.settings.maxBuyin) + ' per buy-in.' : null;
+
+  switch (a.type) {
+    case 'add': {                                    // host adds anyone
+      if (!host) return deny('Only the host can add other players.');
+      const name = cleanName(a.name);
+      if (!name) return deny('Enter a player name.');
+      if (!isCents(a.start)) return deny('Starting balance must be more than $0.');
+      t.players.push({ id: t.nextId++, name, start: a.start, balance: a.start });
+      return { ok: true };
+    }
+    case 'seat': {                                   // a player takes their own seat
+      if (host) return deny('Use Add Player to seat someone as host.');
+      if (!actor.ref) return deny('Your device is not recognised.');
+      if (t.players.some(mine)) return deny('You already have a seat.');
+      const name = cleanName(a.name);
+      if (!name) return deny('Enter your name.');
+      if (!isCents(a.buyin)) return deny('Starting balance must be more than $0.');
+      const m = overMax(a.buyin); if (m) return deny(m);
+      if (t.players.length >= 100) return deny('The table is full.');
+      t.players.push({ id: t.nextId++, name, start: a.buyin, balance: a.buyin, owner: actor.ref });
+      return { ok: true };
+    }
+    case 'settle': {
+      const p = find(a.pid);
+      if (!p) return deny('Player not found.');
+      if (!may(p)) return deny(NOT_YOURS);
+      if (!Number.isInteger(a.wager) || a.wager <= 0) return deny('Wager must be more than $0.');
+      if (a.wager > p.balance) return deny('Wager is more than balance (' + fmt(p.balance) + ').');
+      let delta;
+      if (a.outcome === 'win') delta = a.wager;                        // 1:1
+      else if (a.outcome === 'blackjack') delta = Math.round(a.wager * 3 / 2); // 3:2
+      else if (a.outcome === 'push') delta = 0;
+      else if (a.outcome === 'loss') delta = -a.wager;
+      else return deny('Unknown outcome.');
+      p.balance += delta;
+      logHand(p, a.outcome, a.wager, delta);
+      return { ok: true, delta, balance: p.balance };
+    }
+    case 'rebuy': {                                  // adding chips is logged so everyone can see it
+      const p = find(a.pid);
+      if (!p) return deny('Player not found.');
+      if (!may(p)) return deny(NOT_YOURS);
+      if (!isCents(a.amount)) return deny('Enter an amount of chips to add.');
+      const m = overMax(a.amount); if (m) return deny(m);
+      p.balance += a.amount;
+      logHand(p, 'rebuy', 0, a.amount);
+      return { ok: true, delta: a.amount, balance: p.balance };
+    }
+    case 'undo': {
+      let idx = -1;
+      if (host) idx = t.history.length - 1;
+      else {
+        const seat = t.players.find(mine);
+        if (!seat) return deny('You do not have a seat.');
+        for (let i = t.history.length - 1; i >= 0; i--) if (t.history[i].pid === seat.id) { idx = i; break; }
+      }
+      if (idx < 0) return deny('No hands to undo.');
+      const h = t.history.splice(idx, 1)[0];
+      const p = find(h.pid);
+      if (p) p.balance -= h.delta;                   // newest entry of that seat, so the balance can't go negative
+      return { ok: true, entry: h, playerFound: !!p };
+    }
+    case 'remove': {                                 // host removes anyone; a player can only leave their own seat
+      const p = find(a.pid);
+      if (!p) return deny('Player not found.');
+      if (!may(p)) return deny(NOT_YOURS);
+      t.players = t.players.filter(x => x.id !== p.id);
+      return { ok: true };
+    }
+    case 'reset': {
+      if (!host) return deny('Only the host can reset the table.');
+      t.players.forEach(p => { p.balance = p.start; });
+      t.history = [];
+      return { ok: true };
+    }
+    case 'settings': {
+      if (!host) return deny('Only the host can change table settings.');
+      if (a.locked !== undefined) { if (typeof a.locked !== 'boolean') return deny('Bad setting.'); t.settings.locked = a.locked; }
+      if (a.maxBuyin !== undefined) {
+        if (!Number.isInteger(a.maxBuyin) || a.maxBuyin < 0 || a.maxBuyin > MAX_CENTS) return deny('Bad max buy-in.');
+        t.settings.maxBuyin = a.maxBuyin;
+      }
+      return { ok: true };
+    }
+    default: return deny('Unknown action.');
+  }
 }
 
 const ID_RE = /^[A-Za-z0-9]{32}$/;
@@ -53,13 +196,17 @@ function adminOk(request, env) {
   return !!env.ADMIN_KEY && timingSafeEqual(k, env.ADMIN_KEY);
 }
 
-// A request may use tables only if it comes from an approved device (or the admin).
-async function allowed(request, env) {
-  if (adminOk(request, env)) return true;
+// Who is calling? Tables may only be used by an approved device (or the admin key).
+// 'ref' is the device's public id; it is what marks which seat a player owns.
+async function identify(request, env) {
+  const admin = adminOk(request, env);
   const id = request.headers.get('X-Device-Id') || '';
-  if (!ID_RE.test(id)) return false;
-  const r = await reg(env, '/status', { deviceId: id });
-  return (await r.json()).status === 'approved';
+  let ok = false, ref = '';
+  if (ID_RE.test(id)) {
+    const d = await (await reg(env, '/status', { deviceId: id })).json();
+    if (d.status === 'approved') { ok = true; ref = d.ref || ''; }
+  }
+  return { ok: ok || admin, ref };
 }
 
 async function readJson(request) {
@@ -106,9 +253,10 @@ export default {
       return json({ error: 'not found' }, 404);
     }
 
-    const m = url.pathname.match(/^\/api\/rooms(?:\/([A-Za-z0-9]{4,6}))?$/);
+    const m = url.pathname.match(/^\/api\/rooms(?:\/([A-Za-z0-9]{4,6})(\/act)?)?$/);
     if (!m) return json({ error: 'not found' }, 404);
-    if (!(await allowed(request, env))) return json({ error: 'not approved' }, 403);
+    const who = await identify(request, env);
+    if (!who.ok) return json({ error: 'not approved' }, 403);
 
     // Create a table: find an unused code, claim it, return the host's secret token.
     if (!m[1]) {
@@ -125,6 +273,16 @@ export default {
 
     const code = m[1].toUpperCase();
     const stub = env.ROOM.get(env.ROOM.idFromName(code));
+    if (m[2]) {                                       // POST /api/rooms/CODE/act
+      if (request.method !== 'POST') return json({ error: 'method not allowed' }, 405);
+      const body = await request.text();
+      if (body.length > 4096) return json({ error: 'too large' }, 413);
+      return withCors(await stub.fetch('https://room/act', {
+        method: 'POST',
+        headers: { Authorization: request.headers.get('Authorization') || '', 'X-Ref': who.ref },
+        body,
+      }));
+    }
     if (request.method === 'GET') return withCors(await stub.fetch('https://room/state'));
     if (request.method === 'PUT') {
       const body = await request.text();
@@ -167,21 +325,37 @@ export class Room {
 
     if (!live) return json({ error: 'no such table' }, 404);
 
+    const isHost = timingSafeEqual((request.headers.get('Authorization') || '').replace(/^Bearer /, ''), live.token);
+
+    if (path === '/act') {                           // everyone: host (token) or an approved player
+      let body;
+      try { body = JSON.parse(await request.text()); } catch (e) { return json({ ok: false, error: 'Bad request.' }, 400); }
+      const table = normalizeTable(await this.state.storage.get('table'));
+      const res = applyAction(table, { role: isHost ? 'host' : 'player', ref: request.headers.get('X-Ref') || '' }, body && body.action);
+      if (!res.ok) return json({ ok: false, error: res.error }, 400);
+      const v = live.v + 1;
+      await this.state.storage.put('table', table);
+      await this.state.storage.put('meta', { token: live.token, v, updated: now });
+      return json({ ok: true, v, state: table, delta: res.delta, balance: res.balance, entry: res.entry, playerFound: res.playerFound });
+    }
+
     if (request.method === 'GET') {
-      const table = await this.state.storage.get('table');
+      const table = normalizeTable(await this.state.storage.get('table'));
       return json({ v: live.v, state: table });
     }
 
-    // PUT: host only
-    const auth = (request.headers.get('Authorization') || '').replace(/^Bearer /, '');
-    if (!timingSafeEqual(auth, live.token)) return json({ error: 'unauthorized' }, 401);
+    // PUT: host only, and only once, to start the table from the host's local game
+    if (!isHost) return json({ error: 'unauthorized' }, 401);
     let body;
     try { body = JSON.parse(await request.text()); } catch (e) { return json({ error: 'bad json' }, 400); }
     if (!body || !validState(body.state)) return json({ error: 'bad state' }, 400);
-    const v = live.v + 1;
-    await this.state.storage.put('table', body.state);
-    await this.state.storage.put('meta', { token: live.token, v, updated: now });
-    return json({ ok: true, v });
+    if (live.v !== 0) return json({ error: 'This table has already started.' }, 409);
+    const seed = normalizeTable(Object.assign({}, body.state, {
+      players: body.state.players.map(p => ({ id: p.id, name: p.name, start: p.start, balance: p.balance })), // no owners
+    }));
+    await this.state.storage.put('table', seed);
+    await this.state.storage.put('meta', { token: live.token, v: 1, updated: now });
+    return json({ ok: true, v: 1 });
   }
 }
 
@@ -197,7 +371,7 @@ export class Registry {
 
     if (path === '/status') {
       const d = await s.get('d:' + b.deviceId);
-      return json({ status: d ? d.status : 'none' });
+      return json({ status: d ? d.status : 'none', ref: d ? d.ref : undefined });
     }
 
     if (path === '/request') {
