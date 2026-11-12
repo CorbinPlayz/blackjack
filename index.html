@@ -178,6 +178,34 @@
     color: var(--text); padding: 12px 18px; border-radius: 999px; font-weight: 700; font-size: 15px; box-shadow: 0 6px 20px rgba(0,0,0,.6); transition: transform .35s cubic-bezier(.3,1.4,.5,1); max-width: 92%; text-align: center; pointer-events: none; }
   #toast.on { transform: translate(-50%, 0); }
 
+  #bg { position: fixed; left: 0; top: 0; width: 100%; height: 100%; z-index: -1; pointer-events: none; }
+  h1 span:last-child { text-shadow: 0 0 18px rgba(46,204,113,.55); }
+  .o-bj { background: linear-gradient(110deg, #d9a92c 0%, #f5d76e 40%, #d9a92c 60%, #b98a1c 100%); background-size: 220% 100%; animation: goldsweep 3.2s linear infinite; }
+  @keyframes goldsweep { from { background-position: 120% 0; } to { background-position: -100% 0; } }
+  .outcomes button { transition: transform .08s ease, filter .15s; }
+  .outcomes button:active { transform: scale(.95); }
+  .ring { position: fixed; width: 30px; height: 30px; margin: -15px 0 0 -15px; border-radius: 50%; border: 4px solid var(--rc, #e0b13a); box-shadow: 0 0 24px var(--rc, #e0b13a), inset 0 0 18px var(--rc, #e0b13a); animation: ringout .9s cubic-bezier(.1,.7,.3,1) forwards; }
+  @keyframes ringout { from { transform: scale(.3); opacity: 1; } to { transform: scale(22); opacity: 0; border-width: 1px; } }
+  #appRoot.shake { animation: screenshake .55s cubic-bezier(.36,.07,.19,.97); }
+  @keyframes screenshake { 10%, 90% { transform: translate3d(-2px, 0, 0); } 20%, 80% { transform: translate3d(5px, 2px, 0); } 30%, 50%, 70% { transform: translate3d(-9px, -3px, 0); } 40%, 60% { transform: translate3d(9px, 3px, 0); } }
+  .bjrays { position: absolute; left: 50%; top: 42%; width: 190vmax; height: 190vmax; margin: -95vmax 0 0 -95vmax; pointer-events: none;
+    background: repeating-conic-gradient(from 0deg, rgba(245,215,110,.22) 0deg 7deg, transparent 7deg 22deg);
+    -webkit-mask-image: radial-gradient(circle, #000 0, transparent 38%); mask-image: radial-gradient(circle, #000 0, transparent 38%); animation: raysspin 14s linear infinite; }
+  @keyframes raysspin { to { transform: rotate(360deg); } }
+  #bjShow > * { position: relative; }
+  #bjShow > .bjrays { position: absolute; }
+  .pc .f::after { content: ''; position: absolute; inset: 0; border-radius: 10px; background: linear-gradient(115deg, transparent 35%, rgba(255,255,255,.9) 50%, transparent 65%); background-size: 250% 100%; animation: shine 1.6s .9s ease-in-out 2 backwards; mix-blend-mode: soft-light; }
+  @keyframes shine { from { background-position: 160% 0; } to { background-position: -60% 0; } }
+  .bigchip { display: none; width: 120px; height: 120px; perspective: 500px; margin-bottom: 8px; }
+  .bigchip .spin { display: block; position: relative; width: 100%; height: 100%; transform-style: preserve-3d; animation: chipspin 2.2s linear infinite; }
+  .bigchip i { position: absolute; left: 0; top: 0; width: 100%; height: 100%; border-radius: 50%; font-style: normal; display: flex; align-items: center; justify-content: center; font-size: 54px; color: #f4f4f0;
+    background: radial-gradient(circle, #11321f 0 32%, transparent 33%), repeating-conic-gradient(#f4f4f0 0 15deg, #c0392b 15deg 30deg); border: 5px solid #8e2a20; box-shadow: inset 0 0 0 4px rgba(0,0,0,.25), 0 0 40px rgba(224,177,58,.6); }
+  .bigchip i:nth-child(1) { transform: translateZ(-6px); filter: brightness(.55); } .bigchip i:nth-child(2) { transform: translateZ(-4px); filter: brightness(.65); }
+  .bigchip i:nth-child(3) { transform: translateZ(-2px); filter: brightness(.75); } .bigchip i:nth-child(4) { transform: translateZ(0); filter: brightness(.85); }
+  .bigchip i:nth-child(5) { transform: translateZ(2px); filter: brightness(.9); } .bigchip i:nth-child(6) { transform: translateZ(4px); filter: brightness(.95); }
+  .bigchip i:nth-child(7) { transform: translateZ(6px); }
+  #bjShow.big .bjcards { display: none; } #bjShow.big .bigchip { display: block; }
+  #bjShow.big .bjtxt { margin-top: 10px; }
   body.fx-off *, body.fx-off *::before, body.fx-off *::after { animation: none !important; transition: none !important; }
   @media (prefers-reduced-motion: reduce) { * , *::before, *::after { animation: none !important; transition: none !important; } }
 </style>
@@ -283,16 +311,19 @@
 </div><!-- /appRoot -->
 
 <!-- effects layers (decorative) -->
+<canvas id="bg" aria-hidden="true"></canvas>
 <canvas id="fx" aria-hidden="true"></canvas>
 <div id="fxLayer" aria-hidden="true"></div>
 <div id="flash" aria-hidden="true"></div>
 <div id="toast" role="status"></div>
 <div id="bjShow" aria-hidden="true">
+  <div class="bjrays"></div>
+  <div class="bigchip"><span class="spin"><i></i><i></i><i></i><i></i><i></i><i></i><i>♠</i></span></div>
   <div class="bjcards">
     <div class="pc a"><div class="in"><div class="f"><span>A</span><b>♠</b></div><div class="bk"></div></div></div>
     <div class="pc b"><div class="in"><div class="f red"><span>K</span><b>♥</b></div><div class="bk"></div></div></div>
   </div>
-  <div class="bjtxt">BLACKJACK!</div>
+  <div class="bjtxt" id="bjTitle">BLACKJACK!</div>
   <div class="bjamt" id="bjAmt"></div>
   <div class="bjwho" id="bjWho"></div>
 </div>
@@ -633,13 +664,39 @@ var Core = (function () {
     }
     kick();
   }
-  function embers(x, y, count) {                // sinking red sparks for a loss
+  function embers(x, y, count, up) {            // sinking red sparks for a loss; up = rising flames
     if (!ensureCtx()) return;
-    for (var i = 0; i < count && parts.length < 280; i++) {
-      parts.push({ k: 2, x: x + rnd(-50, 50), y: y + rnd(-10, 10), vx: rnd(-30, 30), vy: rnd(10, 60), g: 70, rad: rnd(2, 5),
-        c: Math.random() < 0.5 ? '#e5484d' : '#7a2326', life: rnd(1.1, 2) });
+    for (var i = 0; i < count && parts.length < 320; i++) {
+      parts.push({ k: 2, x: x + rnd(-50, 50), y: y + rnd(-10, 10), vx: rnd(-30, 30), vy: up ? -rnd(120, 340) : rnd(10, 60), g: up ? -40 : 70, rad: rnd(2, 5) + (up ? 2 : 0),
+        c: up ? ['#ff9f1c', '#ffd23f', '#ff5d2a', '#ffe9a8'][(Math.random() * 4) | 0] : (Math.random() < 0.5 ? '#e5484d' : '#7a2326'), life: rnd(1.1, 2) });
     }
     kick();
+  }
+  function sparks(x, y, pal, count) {           // firework explosion
+    var cols = PAL[pal] || PAL.mix, hue = cols[(Math.random() * cols.length) | 0];
+    for (var i = 0; i < count && parts.length < 360; i++) {
+      var a = rnd(0, 6.2832), sp = rnd(70, 300);
+      parts.push({ k: 4, x: x, y: y, px: x, py: y, vx: Math.cos(a) * sp, vy: Math.sin(a) * sp, g: 170, c: Math.random() < 0.7 ? hue : '#ffffff', life: rnd(0.9, 1.7) });
+    }
+  }
+  function fireworks(n, pal) {                  // rockets launched from the bottom that explode high up
+    if (!ensureCtx()) return;
+    for (var i = 0; i < n; i++) {
+      parts.push({ k: 3, x: rnd(W * 0.15, W * 0.85), y: H + 10, px: 0, py: 0, vx: rnd(-40, 40), vy: -rnd(620, 900), g: 520, pal: pal || 'mix', delay: i * 0.28, life: 3 });
+    }
+    kick();
+  }
+  function ring(x, y, color) {
+    var layer = $('fxLayer'); if (!layer) return;
+    var r = el('div', 'ring'); r.setAttribute('style', 'left:' + Math.round(x) + 'px;top:' + Math.round(y) + 'px;--rc:' + color);
+    layer.appendChild(r);
+    setTimeout(function () { if (r.parentNode) r.parentNode.removeChild(r); }, 1000);
+  }
+  var shakeTimer = null;
+  function shake() {
+    var a = $('appRoot'); a.className = ''; void a.offsetWidth; a.className = 'shake';
+    if (shakeTimer) clearTimeout(shakeTimer);
+    shakeTimer = setTimeout(function () { a.className = ''; }, 650);
   }
   function loop(ts) {
     raf = 0;
@@ -650,9 +707,17 @@ var Core = (function () {
       fxCtx.clearRect(0, 0, W, H);
       for (var i = parts.length - 1; i >= 0; i--) {
         var p = parts[i];
+        if (p.k === 3) {                          // rocket
+          if (p.delay > 0) { p.delay -= dt; continue; }
+          p.px = p.x; p.py = p.y;
+          p.vy += p.g * dt; p.x += p.vx * dt; p.y += p.vy * dt;
+          fxCtx.globalAlpha = 1; fxCtx.fillStyle = '#fff3c4'; fxCtx.fillRect(p.x - 1.5, p.y - 1.5, 3, 8);
+          if (p.vy > -90 || p.y < H * 0.18) { sparks(p.x, p.y, p.pal, 46); parts.splice(i, 1); }
+          continue;
+        }
         p.life -= dt; p.vy += p.g * dt; p.x += p.vx * dt; p.y += p.vy * dt;
         if (p.k === 0) { p.vx *= (1 - 1.5 * dt); p.vy *= (1 - 0.6 * dt); p.r += p.vr * dt; p.f += p.vf * dt; } else if (p.k === 1) p.f += p.vf * dt;
-        if (p.life <= 0 || p.y > H + 40) { parts.splice(i, 1); continue; }
+        if (p.life <= 0 || p.y > H + 40 || p.y < -400) { parts.splice(i, 1); continue; }
         fxCtx.globalAlpha = Math.min(1, p.life / 0.6);
         if (p.k === 0) {
           fxCtx.save(); fxCtx.translate(p.x, p.y); fxCtx.rotate(p.r); fxCtx.scale(1, Math.cos(p.f));
@@ -661,6 +726,9 @@ var Core = (function () {
           var ry = Math.max(1, p.rad * Math.abs(Math.cos(p.f)));
           fxCtx.beginPath(); fxCtx.ellipse(p.x, p.y, p.rad, ry, 0, 0, 6.2832);
           fxCtx.fillStyle = '#e0b13a'; fxCtx.fill(); fxCtx.lineWidth = 2; fxCtx.strokeStyle = '#a87a10'; fxCtx.stroke();
+        } else if (p.k === 4) {                   // spark with a little trail
+          fxCtx.strokeStyle = p.c; fxCtx.lineWidth = 2.2; fxCtx.beginPath(); fxCtx.moveTo(p.px, p.py); fxCtx.lineTo(p.x, p.y); fxCtx.stroke();
+          p.px = p.x - p.vx * 0.03; p.py = p.y - p.vy * 0.03;
         } else {
           fxCtx.beginPath(); fxCtx.arc(p.x, p.y, p.rad, 0, 6.2832); fxCtx.fillStyle = p.c; fxCtx.fill();
         }
@@ -682,14 +750,29 @@ var Core = (function () {
     toastTimer = setTimeout(function () { t.className = ''; }, 2800);
   }
   function hideBj() { if (bjTimer) clearTimeout(bjTimer); bjTimer = null; $('bjShow').className = ''; }
-  function showBlackjack(e) {
+  function countText(elm, prefix, to, dur) {   // numbers that spin up to the amount won
+    if (typeof requestAnimationFrame !== 'function') { elm.textContent = prefix + Core.fmt(to); return; }
+    var t0 = null;
+    function step(ts) {
+      if (t0 === null) t0 = ts;
+      var k = Math.min(1, (ts - t0) / dur);
+      elm.textContent = prefix + Core.fmt(Math.round(to * (1 - Math.pow(1 - k, 3))));
+      if (k < 1) requestAnimationFrame(step); else elm.textContent = prefix + Core.fmt(to);
+    }
+    elm.textContent = prefix + Core.fmt(0); requestAnimationFrame(step);
+  }
+  function showBlackjack(e, big) {              // big = BIG WIN scene (giant chip) instead of the card flip
     var b = $('bjShow');
-    $('bjAmt').textContent = '+' + Core.fmt(e.delta);
+    $('bjTitle').textContent = big ? 'BIG WIN!' : 'BLACKJACK!';
     $('bjWho').textContent = e.name;
-    b.className = ''; void b.offsetWidth; b.className = 'on';
-    rain(70); burst(W * 0.08, H * 0.95, 'gold', 55, 1); burst(W * 0.92, H * 0.95, 'gold', 55, -1);
+    b.className = ''; void b.offsetWidth; b.className = big ? 'on big' : 'on';
+    countText($('bjAmt'), '+', e.delta, 700);
+    rain(big ? 50 : 70); burst(W * 0.08, H * 0.95, 'gold', 55, 1); burst(W * 0.92, H * 0.95, 'gold', 55, -1);
+    fireworks(big ? 3 : 5, big ? 'mix' : 'gold');
+    ring(W / 2, H * 0.42, '#f5d76e'); setTimeout(function () { ring(W / 2, H * 0.42, '#2ecc71'); }, 220);
+    shake(); flash('win');
     if (bjTimer) clearTimeout(bjTimer);
-    bjTimer = setTimeout(hideBj, 3400);
+    bjTimer = setTimeout(hideBj, big ? 3200 : 4000);
   }
   $('bjShow').addEventListener('click', hideBj);
 
@@ -728,10 +811,10 @@ var Core = (function () {
     requestAnimationFrame(step);
   }
 
-  var prevBal = {}, seenHid = null, shownIds = {}, stackN = {};
+  var prevBal = {}, seenHid = null, shownIds = {}, stackN = {}, prevLeader;
   function lastEntry() { var h = Core.state.history; return h.length ? h[h.length - 1] : null; }
   function markSeen() { var e = lastEntry(); seenHid = e ? e.id : 0; }
-  function resetFx() { prevBal = {}; seenHid = null; shownIds = {}; stackN = {}; }
+  function resetFx() { prevBal = {}; seenHid = null; shownIds = {}; stackN = {}; prevLeader = undefined; }
 
   // balance changed on a card: count up/down, pop, glow, floating amount
   function animateChanges() {
@@ -752,6 +835,15 @@ var Core = (function () {
         floatAmt(bal, to - from);
       }
     }
+    // someone just took the lead
+    var ps = Core.state.players.slice().sort(function (a, b) { return b.balance - a.balance; });
+    var lead = ps.length > 1 && ps[0].balance > ps[1].balance ? ps[0] : null;
+    if (prevLeader !== undefined && lead && lead.id !== prevLeader && fxEnabled()) {
+      var pt = originFor(lead.id);
+      toast('👑 ' + lead.name + ' takes the lead!');
+      burst(pt.x, pt.y, 'gold', 36); ring(pt.x, pt.y, '#f5d76e');
+    }
+    if (ps.length > 1) prevLeader = lead ? lead.id : null; else prevLeader = undefined;
     prevBal = next;
   }
 
@@ -764,16 +856,40 @@ var Core = (function () {
     if (!fxEnabled()) return;
     var o = e.outcome, pt = originFor(e.pid);
     if (o === 'blackjack') {
-      if (quiet) { rain(28); burst(pt.x, pt.y, 'gold', 45); } else showBlackjack(e);
+      if (quiet) { rain(28); burst(pt.x, pt.y, 'gold', 45); ring(pt.x, pt.y, '#f5d76e'); fireworks(1, 'gold'); } else showBlackjack(e, false);
     } else if (o === 'win' || o === 'insurance_win') {
-      burst(pt.x, pt.y, 'mix', quiet ? 40 : 110);
-      if (!quiet) flash('win');
+      if (!quiet && isBigWin(e)) showBlackjack(e, true);
+      else {
+        burst(pt.x, pt.y, 'mix', quiet ? 40 : 110);
+        ring(pt.x, pt.y, '#2ecc71');
+        if (!quiet) { flash('win'); if (e.delta >= 2000) fireworks(1, 'mix'); }
+      }
     } else if (o === 'loss' || o === 'insurance_loss') {
-      embers(pt.x, pt.y, quiet ? 8 : 28);
-      if (!quiet) flash('loss');
+      embers(pt.x, pt.y, quiet ? 8 : 34);
+      if (!quiet) { flash('loss'); shake(); ring(pt.x, pt.y, '#e5484d'); }
     } else if (o === 'rebuy') {
       rain(quiet ? 10 : 24);
     }
+    var st = streakOf(e);
+    if (st >= 3 && (o === 'win' || o === 'blackjack')) {
+      toast('🔥 ' + e.name + ' is on fire: ' + st + ' wins in a row!');
+      embers(pt.x, pt.y + 40, 40, true);
+    }
+  }
+  function isBigWin(e) {                         // a hand worth shouting about
+    var p = null; Core.state.players.forEach(function (x) { if (x.id === e.pid) p = x; });
+    var before = p ? p.balance - e.delta : 0;
+    return e.delta >= 5000 || (e.delta >= 1000 && e.delta * 2 >= before);
+  }
+  function streakOf(e) {                         // consecutive winning hands for this player (pushes/side bets don't break it)
+    var n = 0, h = Core.state.history;
+    for (var i = h.length - 1; i >= 0; i--) {
+      if (h[i].pid !== e.pid || h[i].id > e.id) continue;
+      var o = h[i].outcome;
+      if (o === 'win' || o === 'blackjack') n++;
+      else if (o === 'loss') break;
+    }
+    return n;
   }
   function isMine(e) {
     if (!isPlayer()) return false;
@@ -830,6 +946,7 @@ var Core = (function () {
     if (reduced) return;
     lsSet(FX_KEY, fxEnabled() ? '0' : '1');
     applyFxClass();
+    bgStart();
     if (fxEnabled()) burst(W / 2, H * 0.6, 'mix', 70);
   });
   $('chip3d').addEventListener('click', function (e) {
@@ -838,6 +955,39 @@ var Core = (function () {
     burst(r ? r.left + r.width / 2 : W / 2, r ? r.top + r.height / 2 : 80, 'gold', 40);
   });
   applyFxClass();
+
+  /* drifting suits + glow behind everything (throttled to ~30fps, paused when the tab is hidden or effects are off) */
+  var bgC = $('bg'), bgX = null, bgItems = [], bgRaf = 0, bgLast = 0;
+  function bgStart() {
+    if (bgRaf || !fxEnabled() || typeof requestAnimationFrame !== 'function' || !bgC || typeof bgC.getContext !== 'function') return;
+    try { if (!bgX) bgX = bgC.getContext('2d'); } catch (e) { bgX = null; }
+    if (!bgX) return;
+    var w = window.innerWidth || 360, h = window.innerHeight || 640, d = Math.min(window.devicePixelRatio || 1, 2);
+    bgC.width = Math.round(w * d); bgC.height = Math.round(h * d);
+    if (!bgItems.length) for (var i = 0; i < 16; i++) bgItems.push({ x: rnd(0, w), y: rnd(0, h), s: rnd(18, 54), v: rnd(6, 20), r: rnd(0, 6.28), vr: rnd(-0.25, 0.25), g: '♠♥♦♣'.charAt(i % 4), a: rnd(0.04, 0.1) });
+    bgRaf = requestAnimationFrame(function frame(ts) {
+      bgRaf = 0;
+      try {
+        if (!fxEnabled() || (typeof document.hidden !== 'undefined' && document.hidden)) { bgX.clearRect(0, 0, w, h); return; }
+        if (ts - bgLast >= 33) {
+          var dt = bgLast ? Math.min(0.1, (ts - bgLast) / 1000) : 0.033; bgLast = ts;
+          bgX.setTransform(d, 0, 0, d, 0, 0); bgX.clearRect(0, 0, w, h);
+          var gr = bgX.createRadialGradient(w / 2, h * 0.3, 10, w / 2, h * 0.3, h * 0.8);
+          gr.addColorStop(0, 'rgba(46,204,113,.10)'); gr.addColorStop(1, 'rgba(46,204,113,0)');
+          bgX.fillStyle = gr; bgX.fillRect(0, 0, w, h);
+          bgItems.forEach(function (it) {
+            it.y -= it.v * dt; it.r += it.vr * dt; if (it.y < -60) { it.y = h + 60; it.x = rnd(0, w); }
+            bgX.save(); bgX.translate(it.x, it.y); bgX.rotate(it.r); bgX.globalAlpha = it.a;
+            bgX.fillStyle = (it.g === '♥' || it.g === '♦') ? '#e5484d' : '#2ecc71';
+            bgX.font = it.s + 'px sans-serif'; bgX.textAlign = 'center'; bgX.fillText(it.g, 0, 0); bgX.restore();
+          });
+        }
+        bgRaf = requestAnimationFrame(frame);
+      } catch (e) { bgRaf = 0; }
+    });
+  }
+  try { if (document.addEventListener) document.addEventListener('visibilitychange', bgStart); } catch (e) {}
+  bgStart();
 
   function render() {
     var pr = isPlayer(), seat = pr ? mySeat() : null, locked = paused();
