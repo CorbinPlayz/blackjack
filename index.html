@@ -13,7 +13,7 @@
     --card2: #1b251f;
     --line: #26332b;
     --text: #eef3ef;
-    --muted: #8a9a90;
+    --muted: #a3b2a9;
     --green: #2ecc71;
     --green-dark: #1e9d54;
     --red: #e5484d;
@@ -26,12 +26,13 @@
     font-family: -apple-system, BlinkMacSystemFont, "SF Pro Text", "Segoe UI", Roboto, sans-serif;
     padding: max(16px, env(safe-area-inset-top)) max(14px, env(safe-area-inset-right))
              max(28px, env(safe-area-inset-bottom)) max(14px, env(safe-area-inset-left));
-    max-width: 560px; margin: 0 auto; line-height: 1.3;
+    max-width: 560px; margin: 0 auto; line-height: 1.35;
+    padding-bottom: calc(92px + env(safe-area-inset-bottom));
   }
-  h1 { font-size: 22px; margin: 4px 0 14px; letter-spacing: .3px; }
+  h1 { font-size: 20px; margin: 2px 0 12px; letter-spacing: .3px; }
   h1 span { color: var(--green); }
-  .panel { background: var(--card); border: 1px solid var(--line); border-radius: 16px; padding: 14px; margin-bottom: 14px; }
-  .panel h2 { font-size: 13px; text-transform: uppercase; letter-spacing: 1px; color: var(--muted); margin: 0 0 10px; font-weight: 600; }
+  .panel { background: var(--card); border: 1px solid var(--line); border-radius: 16px; padding: 16px; margin-bottom: 14px; }
+  .panel h2 { font-size: 14px; text-transform: uppercase; letter-spacing: 1px; color: var(--text); margin: 0 0 12px; font-weight: 700; }
   .row { display: flex; gap: 10px; }
   .row > * { min-width: 0; }
   input[type="text"], input[type="password"] {
@@ -53,6 +54,7 @@
   .toolbar button { flex: 1; font-size: 15px; }
   .msg { min-height: 18px; font-size: 14px; margin-top: 8px; color: var(--red); }
   .msg.ok { color: var(--green); }
+  .msg:empty { display: none; }
   .empty { text-align: center; color: var(--muted); padding: 22px 8px; }
 
   .online-status { font-size: 14px; color: var(--muted); margin-bottom: 10px; }
@@ -83,11 +85,16 @@
   .result.neg { color: var(--red); }
   .result.neu { color: var(--muted); }
 
-  .adm-group { font-size: 12px; text-transform: uppercase; letter-spacing: .8px; color: var(--muted); margin: 12px 0 4px; }
-  .adm-row { display: flex; align-items: center; justify-content: space-between; gap: 8px; padding: 8px 0; border-top: 1px solid var(--line); }
-  .adm-row .nm { min-width: 0; word-break: break-word; font-weight: 600; }
-  .adm-row .btns { display: flex; gap: 6px; flex: none; }
-  .adm-row button { min-height: 40px; padding: 6px 12px; font-size: 14px; }
+  .adm-group { font-size: 13px; font-weight: 700; text-transform: uppercase; letter-spacing: .8px; color: var(--muted); margin: 18px 0 8px; }
+  .adm-group.pending { color: var(--amber); }
+  .adm-row { background: var(--card2); border: 1px solid var(--line); border-radius: 14px; padding: 12px; margin-bottom: 8px; }
+  .adm-row.pending { border-color: var(--amber); }
+  .adm-row .nm { min-width: 0; word-break: break-word; font-weight: 700; font-size: 17px; }
+  .adm-row .nm .sub { text-transform: none; letter-spacing: 0; font-size: 13px; font-weight: 500; margin: 2px 0 0; word-break: break-all; }
+  .adm-row .btns { display: flex; gap: 8px; margin-top: 10px; }
+  .adm-row button { flex: 1; min-height: 46px; padding: 6px 10px; font-size: 15px; }
+  .adm-add { display: flex; gap: 8px; margin-bottom: 4px; }
+  .adm-add > div:first-child { flex: 3; } .adm-add > div:last-child { flex: 1; }
   .adm-block { background: var(--red); color: #fff; }
   .mt { margin-top: 8px; }
   .f3 { flex: 3; } .f1 { flex: 1; }
@@ -116,6 +123,26 @@
   .player.view { opacity: .92; }
   details.chips { margin-top: 12px; }
   details.chips summary { cursor: pointer; color: var(--muted); font-size: 14px; padding: 6px 0; }
+  .tab[hidden] { display: none !important; }
+  #onlinePanel.compact { padding: 10px 14px; }
+  #onlinePanel.compact h2, #onlinePanel.compact #onlineLabel { display: none; }
+  #onlinePanel.compact #onlineOn { display: grid; grid-template-columns: 1fr auto; align-items: center; gap: 2px 12px; }
+  #onlinePanel.compact .online-code { font-size: 26px; letter-spacing: 4px; margin: 0; grid-row: 1; grid-column: 1; }
+  #onlinePanel.compact #onlineState { margin: 0; grid-row: 2; grid-column: 1; font-size: 13px; }
+  #onlinePanel.compact .online-actions { grid-row: 1 / span 2; grid-column: 2; margin: 0; }
+  #onlinePanel.compact .online-actions button { min-height: 40px; padding: 6px 14px; font-size: 14px; }
+  #onlinePanel.compact #hostTools { display: none; }
+  .rmsg { font-size: 15px; margin-top: 6px; color: var(--text); }
+  #nav { position: fixed; left: 0; right: 0; bottom: 0; z-index: 50; display: flex; justify-content: center; gap: 4px;
+    background: rgba(14,20,17,.97); border-top: 1px solid var(--line); padding: 6px max(8px, env(safe-area-inset-right)) max(8px, env(safe-area-inset-bottom)) max(8px, env(safe-area-inset-left)); }
+  #nav[hidden] { display: none !important; }
+  #nav button { flex: 1; max-width: 110px; min-height: 54px; padding: 4px 2px; background: transparent; color: var(--muted); border: 0; border-radius: 12px;
+    display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 2px; font-size: 12px; font-weight: 700; }
+  #nav button .ic { font-size: 20px; line-height: 1; }
+  #nav button[aria-current="page"] { background: var(--card2); color: var(--green); }
+  #nav button[hidden] { display: none !important; }
+  #navBadge { display: inline-block; margin-left: 4px; background: var(--amber); color: #1a1200; border-radius: 999px; padding: 0 6px; font-size: 11px; }
+  #navBadge:empty { display: none; }
   .banner { border-color: var(--amber); color: var(--amber); font-weight: 600; }
   .hist-row { display: flex; justify-content: space-between; gap: 10px; padding: 9px 0; border-top: 1px solid var(--line); font-size: 15px; }
   .hist-row:first-of-type { border-top: 0; }
@@ -255,6 +282,8 @@
 
 <div id="appRoot" hidden>
 
+<main>
+<section class="tab" id="tab-table" data-tab="table">
 <!-- ONLINE TABLE -->
 <div class="panel" id="onlinePanel">
   <h2>Online table</h2>
@@ -270,16 +299,6 @@
     <div class="online-status" id="onlineLabel"></div>
     <div class="online-code" id="onlineCode"></div>
     <div class="online-status" id="onlineState"></div>
-    <div id="hostTools" hidden>
-      <div class="online-actions">
-        <button type="button" class="btn-ghost" id="inviteBtn">Copy invite link</button>
-        <button type="button" class="btn-ghost" id="lockBtn">Pause players</button>
-      </div>
-      <div class="row mt">
-        <div style="flex:2"><input type="text" id="maxBuyin" placeholder="Max buy-in $ (blank = none)" inputmode="decimal" autocomplete="off"></div>
-        <div style="flex:1"><button type="button" class="btn-ghost" id="maxBuyinBtn" style="width:100%">Set max</button></div>
-      </div>
-    </div>
     <div class="online-actions mt"><button type="button" class="btn-ghost" id="leaveBtn">Leave</button></div>
   </div>
   <div class="msg" id="onlineMsg" role="status"></div>
@@ -287,6 +306,7 @@
 
 <div class="panel banner" id="lockBanner" hidden>The host has paused the table. You can watch, but not change anything, until it resumes.</div>
 
+<div class="panel" id="roundPanel" hidden></div>
 <!-- ADD PLAYER / TAKE A SEAT (no <form>: avoids submission/reload bugs) -->
 <div class="panel" id="addPanel">
   <h2 id="addTitle">Add player</h2>
@@ -299,73 +319,113 @@
   <div class="msg" id="addMsg" role="status"></div>
 </div>
 
+<div id="players"></div>
+
 <div class="toolbar" id="toolbar">
   <button type="button" class="btn-ghost" id="undoBtn">Undo Last Hand</button>
-  <button type="button" class="btn-ghost" id="resetBtn">Reset Balances</button>
 </div>
 <div class="msg" id="toolMsg" role="status" style="margin:-6px 0 10px"></div>
 
-<div class="panel" id="rulesPanel">
-  <h2>Bank fee</h2>
-  <div class="online-status" id="feeInfo">Taking chips from the bank costs a fee. Chips you take count against your net profit.</div>
-  <div class="row">
-    <div style="flex:2"><input type="text" id="bankFee" placeholder="Fee % (0 to 50)" inputmode="numeric" autocomplete="off"></div>
-    <div style="flex:1"><button type="button" class="btn-ghost" id="bankFeeBtn" style="width:100%">Set fee</button></div>
-  </div>
-  <div class="row mt">
-    <div style="flex:2"><input type="text" id="bankLimit" placeholder="Max trips per player (0 = no limit)" inputmode="numeric" autocomplete="off"></div>
-    <div style="flex:1"><button type="button" class="btn-ghost" id="bankLimitBtn" style="width:100%">Set limit</button></div>
-  </div>
-  <div class="row mt">
-    <div style="flex:2"><input type="text" id="triviaPct" placeholder="Trivia bonus % of buy-in (0 to 20)" inputmode="numeric" autocomplete="off"></div>
-    <div style="flex:1"><button type="button" class="btn-ghost" id="triviaPctBtn" style="width:100%">Set trivia</button></div>
-  </div>
-  <button type="button" class="btn-ghost mt" id="roundsBtn" style="width:100%">Rounds: On</button>
-  <div class="msg" id="feeMsg" role="status"></div>
-</div>
+</section>
 
-<div class="panel" id="roundPanel" hidden></div>
-<div class="panel" id="vaultPanel" hidden>
-  <h2>Your vault</h2>
-  <div class="online-status" id="vaultInfo">Chips you save here stay yours between games.</div>
-  <div class="row">
-    <div style="flex:2"><input type="text" id="vaultAmt" placeholder="Chips $" inputmode="decimal" autocomplete="off"></div>
-    <div style="flex:1"><button type="button" class="btn-ghost" id="vaultSave" style="width:100%">Save</button></div>
-    <div style="flex:1"><button type="button" class="btn-ghost" id="vaultTake" style="width:100%">Withdraw</button></div>
-  </div>
-  <div class="msg" id="vaultMsg" role="status"></div>
-</div>
-
+<section class="tab" id="tab-board" data-tab="board" hidden>
 <div class="panel" id="standingsPanel" hidden>
   <h2>Standings · net vs. buy-in</h2>
   <div id="standings"></div>
 </div>
-
-<div id="players"></div>
 
 <div class="panel" id="historyPanel">
   <h2>Recent hands</h2>
   <div id="history"></div>
 </div>
 
-<div class="row" style="margin-bottom:10px">
+</section>
+
+<section class="tab" id="tab-me" data-tab="me" hidden>
+<div class="panel" id="vaultPanel" hidden>
+  <h2>Your vault</h2>
+  <div class="online-status" id="vaultInfo">Chips you save here stay yours between games.</div>
+  <input type="text" id="vaultAmt" placeholder="Chips $" inputmode="decimal" autocomplete="off">
+  <div class="row mt">
+    <button type="button" class="btn-ghost" id="vaultSave" style="flex:1">Save to vault</button>
+    <button type="button" class="btn-ghost" id="vaultTake" style="flex:1">Withdraw</button>
+  </div>
+  <div class="msg" id="vaultMsg" role="status"></div>
+</div>
+
+<div class="panel" id="mePanel">
+  <h2>Your settings</h2>
+<div class="row">
   <button type="button" class="btn-ghost" id="fxBtn" style="flex:1">Effects: On</button>
   <button type="button" class="btn-ghost" id="sndBtn" style="flex:1">Sound: On</button>
 </div>
-<button type="button" class="btn-ghost" id="adminBtn" style="width:100%" hidden>Admin</button>
-<div class="panel" id="adminPanel" hidden style="margin-top:14px">
+  <div class="online-status mt" id="meHint">Your vault is available once you join an online table.</div>
+  <button type="button" class="btn-ghost" id="adminBtn" style="width:100%;margin-top:10px" hidden>Admin sign-in</button>
+</div>
+</section>
+
+<section class="tab" id="tab-host" data-tab="host" hidden>
+<div class="panel" id="hostPanel">
+  <h2>Host tools</h2>
+  <div class="online-status" id="hostHint">Start an online table on the Table tab to get an invite link and pause controls.</div>
+    <div id="hostTools" hidden>
+      <div class="online-actions">
+        <button type="button" class="btn-ghost" id="inviteBtn">Copy invite link</button>
+        <button type="button" class="btn-ghost" id="lockBtn">Pause players</button>
+      </div>
+      <div class="row mt">
+        <div style="flex:2"><input type="text" id="maxBuyin" placeholder="Max buy-in $ (blank = none)" inputmode="decimal" autocomplete="off"></div>
+        <div style="flex:1"><button type="button" class="btn-ghost" id="maxBuyinBtn" style="width:100%">Set max</button></div>
+      </div>
+    </div>
+  <button type="button" class="btn-ghost mt" id="resetBtn" style="width:100%">Reset all balances</button>
+</div>
+<div class="panel" id="rulesPanel">
+  <h2>Table rules</h2>
+  <div class="online-status" id="feeInfo">Taking chips from the bank costs a fee. Chips you take count against your net profit.</div>
+  <div class="row">
+    <div style="flex:2"><input type="text" id="bankFee" placeholder="Bank fee % (0-50)" inputmode="numeric" autocomplete="off"></div>
+    <div style="flex:1"><button type="button" class="btn-ghost" id="bankFeeBtn" style="width:100%">Set fee</button></div>
+  </div>
+  <div class="row mt">
+    <div style="flex:2"><input type="text" id="bankLimit" placeholder="Bank trips each (0 = ∞)" inputmode="numeric" autocomplete="off"></div>
+    <div style="flex:1"><button type="button" class="btn-ghost" id="bankLimitBtn" style="width:100%">Set limit</button></div>
+  </div>
+  <div class="row mt">
+    <div style="flex:2"><input type="text" id="triviaPct" placeholder="Trivia % of buy-in (0-20)" inputmode="numeric" autocomplete="off"></div>
+    <div style="flex:1"><button type="button" class="btn-ghost" id="triviaPctBtn" style="width:100%">Set trivia</button></div>
+  </div>
+  <button type="button" class="btn-ghost mt" id="roundsBtn" style="width:100%">Rounds: On</button>
+  <div class="msg" id="feeMsg" role="status"></div>
+</div>
+
+</section>
+
+<section class="tab" id="tab-admin" data-tab="admin" hidden>
+<div class="panel" id="adminPanel">
   <h2>Admin · who can use this app</h2>
   <div id="adminKeyBox" hidden>
     <input type="password" id="adminKeyInput" placeholder="Admin key" autocomplete="off">
     <button type="button" class="btn-add" id="adminKeyBtn">Unlock admin</button>
   </div>
-  <div class="row" style="margin-bottom:8px">
-    <div style="flex:3"><input type="text" id="adminEmail" placeholder="Approve a Google email" inputmode="email" autocomplete="off" autocapitalize="off"></div>
-    <div style="flex:1"><button type="button" class="btn-ghost" id="adminEmailBtn" style="width:100%">Allow</button></div>
+  <div class="adm-add">
+    <div><input type="text" id="adminEmail" placeholder="Approve a Google email" inputmode="email" autocomplete="off" autocapitalize="off"></div>
+    <div><button type="button" class="btn-ghost" id="adminEmailBtn" style="width:100%">Allow</button></div>
   </div>
   <div id="adminList"></div>
   <div class="msg" id="adminMsg" role="status"></div>
 </div>
+
+</section>
+</main>
+
+<nav id="nav" aria-label="Sections">
+  <button type="button" data-go="table"><span class="ic">♠</span><span>Table</span></button>
+  <button type="button" data-go="board"><span class="ic">🏆</span><span>Board</span></button>
+  <button type="button" data-go="me"><span class="ic">👤</span><span>Me</span></button>
+  <button type="button" data-go="host"><span class="ic">⚙️</span><span>Host</span></button>
+  <button type="button" data-go="admin"><span class="ic">🛡️</span><span>Admin<b id="navBadge"></b></span></button>
+</nav>
 
 </div><!-- /appRoot -->
 
@@ -1774,6 +1834,7 @@ var Core = (function () {
   /* drifting suits + glow behind everything (throttled to ~30fps, paused when the tab is hidden or effects are off) */
   var bgC = $('bg'), bgX = null, bgItems = [], bgRaf = 0, bgLast = 0;
   function bgStart() {
+    return;   // the drifting card suits made the table look cloudy: the felt stays calm and flat
     if (bgRaf || !fxEnabled() || typeof requestAnimationFrame !== 'function' || !bgC || typeof bgC.getContext !== 'function') return;
     try { if (!bgX) bgX = bgC.getContext('2d'); } catch (e) { bgX = null; }
     if (!bgX) return;
@@ -1804,7 +1865,40 @@ var Core = (function () {
   try { if (document.addEventListener) document.addEventListener('visibilitychange', bgStart); } catch (e) {}
   bgStart();
 
+  /* ---------- tabs ---------- */
+  var TAB_KEY = 'bjTab.v1', curTab = lsGet(TAB_KEY) || 'table', adminTab = false;
+  function tabVisible(n) {
+    if (n === 'host') return !isPlayer();
+    if (n === 'admin') return !!ONLINE_URL && (adminTab || !!adminKeyVal());
+    return ['table', 'board', 'me'].indexOf(n) >= 0;
+  }
+  function renderTabs() {
+    if (!tabVisible(curTab)) curTab = 'table';
+    var btns = document.querySelectorAll ? document.querySelectorAll('#nav button') : [];
+    for (var i = 0; i < btns.length; i++) {
+      var n = btns[i].getAttribute('data-go');
+      btns[i].hidden = !tabVisible(n);
+      if (n === curTab) btns[i].setAttribute('aria-current', 'page'); else btns[i].removeAttribute('aria-current');
+    }
+    ['table', 'board', 'me', 'host', 'admin'].forEach(function (n) { var sec = $('tab-' + n); if (sec) sec.hidden = n !== curTab; });
+    if ($('adminBtn')) $('adminBtn').hidden = !ONLINE_URL || tabVisible('admin');
+    var hh = $('hostHint'); if (hh) hh.hidden = online.role === 'host';
+    var mh = $('meHint'); if (mh) mh.hidden = !!online.role;
+  }
+  function showTab(n) {
+    if (!tabVisible(n)) return;
+    curTab = n; lsSet(TAB_KEY, n);
+    renderTabs();
+    if (n === 'admin') adminLoad();
+    try { window.scrollTo(0, 0); } catch (e) {}
+  }
+  $('nav').addEventListener('click', function (e) {
+    var b = e.target.closest ? e.target.closest('button[data-go]') : null;
+    if (b) { e.preventDefault(); showTab(b.getAttribute('data-go')); }
+  });
+
   function render() {
+    renderTabs();
     var pr = isPlayer(), seat = pr ? mySeat() : null, locked = paused();
     $('addPanel').hidden = pr && (!!seat || locked);
     $('addTitle').textContent = pr ? 'Take a seat' : 'Add player';
@@ -2125,7 +2219,7 @@ var Core = (function () {
     var msg = '';
     if (t.round.phase === 'betting') msg = !ready.length ? 'Nobody can play yet.' : waiting.length ? 'Waiting for wagers: ' + waiting.map(function (p) { return p.name; }).join(', ') : 'All wagers are in. The dealer can start.';
     else msg = inHand.length + ' hand' + (inHand.length === 1 ? '' : 's') + ' still to settle: ' + inHand.map(function (p) { return p.name; }).join(', ') + '. Once yours is settled, you can wager for the next round.';
-    box.appendChild(el('div', 'sub', msg));
+    box.appendChild(el('div', 'rmsg', msg));
     // dealer hand-over
     var drow = el('div', 'row mt');
     if (t.dealerReq) {
@@ -2472,6 +2566,7 @@ var Core = (function () {
     var on = !!online.role;
     $('onlineOff').hidden = on;
     $('onlineOn').hidden = !on;
+    $('onlinePanel').className = 'panel' + (on ? ' compact' : '');
     if (on) {
       $('onlineLabel').textContent = online.role === 'host' ? 'You are hosting. Players join with this code:' : 'You joined table:';
       $('onlineCode').textContent = online.code;
@@ -2667,7 +2762,6 @@ var Core = (function () {
     if (adminTimer) { clearInterval(adminTimer); adminTimer = null; }
     if (accessTimer) { clearInterval(accessTimer); accessTimer = null; }
     clearOnline('');
-    $('adminPanel').hidden = true;
   }
 
   function accessLost() { checkAccess(); }
@@ -2775,6 +2869,7 @@ var Core = (function () {
     var row = el('div', 'adm-row');
     var nmEl = el('div', 'nm', d.name); if (d.email) nmEl.appendChild(el('div', 'sub', d.email));
     row.appendChild(nmEl);
+    if (d.status === 'pending') row.className += ' pending';
     var btns = el('div', 'btns');
     [['approve', 'Approve', ''], ['block', 'Block', 'adm-block'], ['remove', 'Remove', 'btn-ghost']].forEach(function (a) {
       if ((a[0] === 'approve' && d.status === 'approved') || (a[0] === 'block' && d.status === 'blocked')) return;
@@ -2796,13 +2891,14 @@ var Core = (function () {
       var devices = (await r.json()).devices || [];
       var waiting = devices.filter(function (d) { return d.status === 'pending'; }).length;
       $('adminBtn').textContent = waiting ? 'Admin (' + waiting + ' waiting)' : 'Admin';
+      $('navBadge').textContent = waiting ? String(waiting) : '';
       $('adminKeyBox').hidden = true;
       if (!adminTimer) adminTimer = setInterval(adminLoad, 10000);   // keeps the "waiting" count fresh
       var list = $('adminList'); list.innerHTML = '';
       [['pending', 'Waiting for approval'], ['approved', 'Allowed'], ['blocked', 'Blocked']].forEach(function (g) {
         var items = devices.filter(function (d) { return d.status === g[0]; });
         if (!items.length) return;
-        list.appendChild(el('div', 'adm-group', g[1] + ' (' + items.length + ')'));
+        list.appendChild(el('div', 'adm-group' + (g[0] === 'pending' ? ' pending' : ''), g[1] + ' (' + items.length + ')'));
         items.forEach(function (d) { list.appendChild(adminRow(d)); });
       });
       if (!devices.length) list.appendChild(el('div', 'empty', 'Nobody has asked for access yet.'));
@@ -2841,9 +2937,7 @@ var Core = (function () {
   $('gateAdminKey').addEventListener('keydown', function (ev) { if (ev.key === 'Enter') { ev.preventDefault(); adminSignIn(); } });
   $('adminBtn').addEventListener('click', function (e) {
     e.preventDefault();
-    var open = $('adminPanel').hidden;
-    $('adminPanel').hidden = !open;
-    if (open) adminLoad();
+    adminTab = true; renderTabs(); showTab('admin');
   });
   function unlockAdmin() {
     var k = $('adminKeyInput').value.trim();
@@ -2867,6 +2961,8 @@ var Core = (function () {
     $('gatePanel').hidden = true;
     $('appRoot').hidden = false;
     $('adminBtn').hidden = !ONLINE_URL;
+    renderTabs();
+    if (ONLINE_URL && adminKeyVal()) adminLoad();
     if (started) return;
     started = true;
     // Re-check with the server while the app is open, so removing or blocking someone locks them out.
