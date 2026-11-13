@@ -435,6 +435,42 @@ function timingSafeEqual(a, b) {
   return r === 0;
 }
 
+/* ---------- Google sign-in: verify a Google ID token (RS256) ---------- */
+const GOOGLE_CLIENT_ID = '355335461593-qtlhcosgt9a5dssu9lnnfp81t7pnbrbv.apps.googleusercontent.com';
+const b64u = s => { s = s.replace(/-/g, '+').replace(/_/g, '/'); while (s.length % 4) s += '='; const bin = atob(s); const u = new Uint8Array(bin.length); for (let i = 0; i < bin.length; i++) u[i] = bin.charCodeAt(i); return u; };
+const b64uText = s => new TextDecoder().decode(b64u(s));
+
+// Pure check: returns { email, name } or null. keys = Google's JWKS list.
+export async function verifyIdToken(token, keys, clientId, nowSec) {
+  try {
+    const parts = String(token || '').split('.');
+    if (parts.length !== 3) return null;
+    const header = JSON.parse(b64uText(parts[0])), payload = JSON.parse(b64uText(parts[1]));
+    if (header.alg !== 'RS256') return null;
+    const jwk = (keys || []).find(k => k.kid === header.kid);
+    if (!jwk) return null;
+    const key = await crypto.subtle.importKey('jwk', jwk, { name: 'RSASSA-PKCS1-v1_5', hash: 'SHA-256' }, false, ['verify']);
+    const ok = await crypto.subtle.verify('RSASSA-PKCS1-v1_5', key, b64u(parts[2]), new TextEncoder().encode(parts[0] + '.' + parts[1]));
+    if (!ok) return null;
+    if (payload.aud !== clientId) return null;
+    if (payload.iss !== 'https://accounts.google.com' && payload.iss !== 'accounts.google.com') return null;
+    if (!(payload.exp > nowSec) || (payload.iat && payload.iat > nowSec + 300)) return null;
+    if (payload.email_verified !== true && payload.email_verified !== 'true') return null;
+    const email = String(payload.email || '').toLowerCase();
+    if (!/^[^\s@<>]+@[^\s@<>]+$/.test(email) || email.length > 120) return null;
+    return { email, name: String(payload.name || email.split('@')[0]).replace(/[\u0000-\u001f<>]/g, '').trim().slice(0, 30) || email.split('@')[0].slice(0, 30) };
+  } catch (e) { return null; }
+}
+
+let certCache = { t: 0, keys: null };
+async function googleKeys() {
+  if (certCache.keys && Date.now() - certCache.t < 3600000) return certCache.keys;
+  const r = await fetch('https://www.googleapis.com/oauth2/v3/certs');
+  if (!r.ok) throw new Error('certs');
+  certCache = { t: Date.now(), keys: (await r.json()).keys || [] };
+  return certCache.keys;
+}
+
 export default {
   async fetch(request, env) {
     if (request.method === 'OPTIONS') return new Response(null, { status: 204, headers: CORS });
@@ -451,6 +487,15 @@ export default {
       if (!ID_RE.test(String(b.deviceId || ''))) return json({ error: 'bad device' }, 400);
       return withCors(await reg(env, '/request', { deviceId: b.deviceId, name: b.name }));
     }
+    if (url.pathname === '/api/access/google' && request.method === 'POST') {     // sign in with Google: links this device to the account
+      const b = await readJson(request);
+      if (!ID_RE.test(String(b.deviceId || ''))) return json({ error: 'bad device' }, 400);
+      let who;
+      try { who = await verifyIdToken(b.idToken, await googleKeys(), GOOGLE_CLIENT_ID, Math.floor(Date.now() / 1000)); }
+      catch (e) { return json({ error: 'Could not reach Google. Try again.' }, 502); }
+      if (!who) return json({ error: 'Google sign-in could not be verified.' }, 401);
+      return withCors(await reg(env, '/google', { deviceId: b.deviceId, email: who.email, name: who.name }));
+    }
     if (url.pathname.startsWith('/api/admin/')) {
       if (!adminOk(request, env)) return json({ error: 'unauthorized' }, 401);
       if (url.pathname === '/api/admin/devices' && request.method === 'GET') return withCors(await reg(env, '/list'));
@@ -458,6 +503,12 @@ export default {
         const b = await readJson(request);
         if (!ID_RE.test(String(b.deviceId || ''))) return json({ error: 'bad device' }, 400);
         return withCors(await reg(env, '/self', { deviceId: b.deviceId }));
+      }
+      if (url.pathname === '/api/admin/email' && request.method === 'POST') {     // pre-approve a Google email
+        const b = await readJson(request);
+        const email = String(b.email || '').trim().toLowerCase();
+        if (!/^[^\s@<>]+@[^\s@<>]+$/.test(email) || email.length > 120) return json({ error: 'bad email' }, 400);
+        return withCors(await reg(env, '/preapprove', { email }));
       }
       const am = url.pathname.match(/^\/api\/admin\/devices\/([A-Za-z0-9]+)$/);
       if (am && request.method === 'POST') {
@@ -604,7 +655,42 @@ export class Registry {
 
     if (path === '/status') {
       const d = await s.get('d:' + b.deviceId);
+      if (d && d.google) {                           // a device signed in with Google follows its account
+        const a = await s.get('g:' + d.google);
+        return json({ status: a ? a.status : 'none', ref: a ? a.ref : undefined, email: d.google });
+      }
       return json({ status: d ? d.status : 'none', ref: d ? d.ref : undefined });
+    }
+
+    if (path === '/google') {
+      const dk = 'd:' + b.deviceId, old = await s.get(dk);
+      if (old && !old.google && old.status === 'blocked') return json({ status: 'blocked' });   // can not dodge a block by signing in
+      const key = 'g:' + b.email;
+      let a = await s.get(key);
+      if (!a) {
+        const all = await s.list({ prefix: 'g:' });
+        let pending = 0;
+        for (const v of all.values()) if (v.status === 'pending') pending++;
+        if (pending >= MAX_PENDING) return json({ error: 'too many pending requests' }, 429);
+        let ref;
+        do { ref = randomString(8, ALNUM); } while (await s.get('r:' + ref));
+        a = { ref, name: b.name, email: b.email, status: 'pending', requested: Date.now() };
+        await s.put(key, a);
+        await s.put('r:' + ref, key);
+      }
+      await s.put(dk, { google: b.email, requested: Date.now() });
+      return json({ status: a.status, ref: a.ref });
+    }
+
+    if (path === '/preapprove') {
+      const key = 'g:' + b.email;
+      const a = await s.get(key);
+      if (a) { a.status = 'approved'; await s.put(key, a); return json({ ok: true, ref: a.ref }); }
+      let ref;
+      do { ref = randomString(8, ALNUM); } while (await s.get('r:' + ref));
+      await s.put(key, { ref, name: b.email.split('@')[0].slice(0, 30), email: b.email, status: 'approved', requested: Date.now() });
+      await s.put('r:' + ref, key);
+      return json({ ok: true, ref });
     }
 
     if (path === '/request') {
@@ -612,7 +698,7 @@ export class Registry {
       if (!name) return json({ error: 'name required' }, 400);
       const key = 'd:' + b.deviceId;
       const existing = await s.get(key);
-      if (existing) return json({ status: existing.status }); // blocked stays blocked
+      if (existing) return json({ status: existing.google ? 'none' : existing.status }); // blocked stays blocked
       const all = await s.list({ prefix: 'd:' });
       let pending = 0;
       for (const v of all.values()) if (v.status === 'pending') pending++;
@@ -627,17 +713,21 @@ export class Registry {
     if (path === '/list') {
       const all = await s.list({ prefix: 'd:' });
       const devices = [];
-      for (const v of all.values()) devices.push({ ref: v.ref, name: v.name, status: v.status, requested: v.requested });
+      for (const v of all.values()) if (!v.google) devices.push({ ref: v.ref, name: v.name, status: v.status, requested: v.requested });
+      const accts = await s.list({ prefix: 'g:' });
+      for (const v of accts.values()) devices.push({ ref: v.ref, name: v.name, email: v.email, status: v.status, requested: v.requested });
       devices.sort((x, y) => y.requested - x.requested);
       return json({ devices });
     }
 
     if (path === '/action') {
       const id = await s.get('r:' + b.ref);
-      const d = id && await s.get('d:' + id);
+      const g = typeof id === 'string' && id.startsWith('g:');          // Google account, or a plain device
+      const d = id && await s.get(g ? id : 'd:' + id);
       if (!d) return json({ error: 'not found' }, 404);
-      if (b.action === 'remove') { await s.delete('d:' + id); await s.delete('r:' + b.ref); }
-      else { d.status = b.action === 'approve' ? 'approved' : 'blocked'; await s.put('d:' + id, d); }
+      const key = g ? id : 'd:' + id;
+      if (b.action === 'remove') { await s.delete(key); await s.delete('r:' + b.ref); }
+      else { d.status = b.action === 'approve' ? 'approved' : 'blocked'; await s.put(key, d); }
       return json({ ok: true });
     }
 
@@ -656,7 +746,7 @@ export class Registry {
     if (path === '/self') { // the admin's own device
       const key = 'd:' + b.deviceId;
       const existing = await s.get(key);
-      if (existing) { existing.status = 'approved'; await s.put(key, existing); return json({ status: 'approved' }); }
+      if (existing) { existing.status = 'approved'; delete existing.google; await s.put(key, existing); return json({ status: 'approved' }); }
       let ref;
       do { ref = randomString(8, ALNUM); } while (await s.get('r:' + ref));
       await s.put(key, { ref, name: 'Admin', status: 'approved', requested: Date.now() });

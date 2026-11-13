@@ -234,6 +234,10 @@
 <div class="panel" id="gatePanel" hidden>
   <h2>Private table</h2>
   <div class="online-status" id="gateChecking">Checking access…</div>
+  <div id="gateGoogle" hidden>
+    <div class="online-status">Sign in with Google. Once the host approves your email, your seat and vault follow you to any phone.</div>
+    <div id="gGoogle" style="min-height:44px;margin:8px 0"></div>
+  </div>
   <div id="gateRequest" hidden>
     <div class="online-status">This app is invite-only. Enter your name and the host will approve you.</div>
     <input type="text" id="gateName" placeholder="Your name" autocomplete="off" autocapitalize="words" maxlength="30">
@@ -354,6 +358,10 @@
   <div id="adminKeyBox" hidden>
     <input type="password" id="adminKeyInput" placeholder="Admin key" autocomplete="off">
     <button type="button" class="btn-add" id="adminKeyBtn">Unlock admin</button>
+  </div>
+  <div class="row" style="margin-bottom:8px">
+    <div style="flex:3"><input type="text" id="adminEmail" placeholder="Approve a Google email" inputmode="email" autocomplete="off" autocapitalize="off"></div>
+    <div style="flex:1"><button type="button" class="btn-ghost" id="adminEmailBtn" style="width:100%">Allow</button></div>
   </div>
   <div id="adminList"></div>
   <div class="msg" id="adminMsg" role="status"></div>
@@ -1265,6 +1273,7 @@ var Core = (function () {
   var ONLINE_URL = 'https://blackjack-table.camc-cf76.workers.dev';
 
   /* ---------- device identity + server calls ---------- */
+  var GOOGLE_CLIENT_ID = '355335461593-qtlhcosgt9a5dssu9lnnfp81t7pnbrbv.apps.googleusercontent.com';
   var DEVICE_KEY = 'bjDevice.v1', ACCESS_KEY = 'bjAccess.v1', ADMIN_STORE = 'bjAdminKey.v1';
   var deviceMem = null;
   function lsGet(k) { try { return localStorage.getItem(k); } catch (e) { return null; } }
@@ -2647,6 +2656,8 @@ var Core = (function () {
     $('gatePanel').hidden = false;
     $('gateChecking').hidden = access !== 'checking';
     $('gateRequest').hidden = access !== 'none';
+    $('gateGoogle').hidden = !(access === 'none' || access === 'pending' || access === 'blocked') || !GOOGLE_CLIENT_ID;
+    if (access === 'none') fxSafe(loadGoogle);
     $('gatePending').hidden = access !== 'pending';
     $('gateBlocked').hidden = access !== 'blocked';
   }
@@ -2688,6 +2699,36 @@ var Core = (function () {
     } catch (e) {
       if (access === 'checking') { access = 'none'; renderGate(); gateMsg('Could not reach the server. Check your connection.'); }
     }
+  }
+
+  /* ---------- Sign in with Google ---------- */
+  var gLoaded = false;
+  function loadGoogle() {
+    if (gLoaded || !GOOGLE_CLIENT_ID || !ONLINE_URL || typeof document.createElement !== 'function') return;
+    gLoaded = true;
+    var sc = document.createElement('script');
+    sc.src = 'https://accounts.google.com/gsi/client'; sc.async = true;
+    sc.onload = function () {
+      try {
+        window.google.accounts.id.initialize({ client_id: GOOGLE_CLIENT_ID, callback: googleSignIn, auto_select: false });
+        window.google.accounts.id.renderButton($('gGoogle'), { theme: 'filled_black', size: 'large', text: 'signin_with', shape: 'pill', width: 280 });
+      } catch (e) { gateMsg('Google sign-in is not available here. Use the name request below.'); }
+    };
+    sc.onerror = function () { gLoaded = false; gateMsg('Could not load Google sign-in. Check your connection.'); };
+    document.head.appendChild(sc);
+  }
+  async function googleSignIn(resp) {
+    gateMsg('');
+    try {
+      var r = await api('/api/access/google', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ deviceId: getDevice(), idToken: resp && resp.credential })
+      });
+      var d = {}; try { d = await r.json(); } catch (e) {}
+      if (!r.ok) { gateMsg(d.error || 'Google sign-in did not work. Try again.'); return; }
+      applyAccess(d.status === 'approved' || d.status === 'pending' || d.status === 'blocked' ? d.status : 'none');
+      checkAccess();
+    } catch (e) { gateMsg('Could not reach the server. Check your connection.'); }
   }
 
   async function requestAccess() {
@@ -2732,7 +2773,8 @@ var Core = (function () {
 
   function adminRow(d) {
     var row = el('div', 'adm-row');
-    row.appendChild(el('div', 'nm', d.name));
+    var nmEl = el('div', 'nm', d.name); if (d.email) nmEl.appendChild(el('div', 'sub', d.email));
+    row.appendChild(nmEl);
     var btns = el('div', 'btns');
     [['approve', 'Approve', ''], ['block', 'Block', 'adm-block'], ['remove', 'Remove', 'btn-ghost']].forEach(function (a) {
       if ((a[0] === 'approve' && d.status === 'approved') || (a[0] === 'block' && d.status === 'blocked')) return;
@@ -2781,6 +2823,17 @@ var Core = (function () {
     adminLoad();
   }
 
+  $('adminEmailBtn').addEventListener('click', async function (e) {
+    e.preventDefault();
+    var em = $('adminEmail').value.trim().toLowerCase();
+    if (!/^[^\s@<>]+@[^\s@<>]+$/.test(em)) { adminMsg('Enter a full email address.'); return; }
+    try {
+      var r = await api('/api/admin/email', { method: 'POST', headers: { 'X-Admin-Key': adminKeyVal(), 'Content-Type': 'application/json' }, body: JSON.stringify({ email: em }) });
+      if (!r.ok) throw new Error('status ' + r.status);
+      $('adminEmail').value = ''; adminMsg(em + ' is allowed. They can now sign in with Google.');
+    } catch (err) { adminMsg('That did not go through. Try again.'); return; }
+    adminLoad();
+  });
   $('gateBtn').addEventListener('click', function (e) { e.preventDefault(); requestAccess(); });
   $('gateName').addEventListener('keydown', function (ev) { if (ev.key === 'Enter') { ev.preventDefault(); requestAccess(); } });
   $('gateAdminToggle').addEventListener('click', function (e) { e.preventDefault(); $('gateAdmin').hidden = !$('gateAdmin').hidden; });

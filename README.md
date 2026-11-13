@@ -49,3 +49,7 @@ Tables expire after 24 hours idle. Hosting uses a secret token that only the hos
 - **Choosing the dealer**: a seated player taps **Request dealer** (between rounds); the current dealer taps **Accept** or **Reject**. The host can also assign the dealer or take the deck back. The dealer sits out of betting.
 - **Trivia**: 594 questions in 12 categories, one question per round (20 seconds, a wrong answer or time-out uses up the question). A right answer pays a fifth of the allowance, and total trivia winnings are capped at the host's **trivia %** of the player's buy-in (0 to 20, default 10, 0 = off). It counts toward net profit. The answer check runs on the player's phone, so it is an honour system with a hard cap.
 - **Vault**: players can save chips from the table into a personal vault that is tied to their approved device and survives between games. Saving and withdrawing are free and are not bank trips. A new seat can be bought with vault chips. Net profit = balance + saved - start - bank chips - withdrawn.
+
+## Google accounts
+
+Players sign in with **Sign in with Google** (Google Identity Services). The worker verifies the ID token itself (RS256 signature against Google's published keys, audience = the Client ID, issuer, expiry, verified email). A new email lands in the admin's "Waiting for approval" list, and the admin can also pre-approve an email in the admin panel. Approval, blocking, seats and the vault belong to the Google account, so they follow the person to any phone. The name-request flow is still there as a fallback.
