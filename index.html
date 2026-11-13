@@ -111,6 +111,11 @@
   .btn-start[disabled] { opacity:.4; }
   .locked { color: var(--green); font-weight:700; margin:6px 0; }
   .inplay { font-weight:800; font-size:18px; margin:8px 0; }
+  #confirmModal { position:fixed; inset:0; background:rgba(0,0,0,.78); z-index:70; display:none; align-items:center; justify-content:center; padding:16px; }
+  #confirmModal.on { display:flex; }
+  #confirmModal .box { background: var(--card); border:1px solid var(--line); border-radius:18px; padding:18px; max-width:420px; width:100%; }
+  #confirmModal .tq { font-size:18px; font-weight:700; margin:4px 0 16px; }
+  #confirmYes.danger { background: var(--red); color:#fff; }
   #triviaModal { position:fixed; inset:0; background:rgba(0,0,0,.78); z-index:60; display:none; align-items:center; justify-content:center; padding:16px; }
   #triviaModal.on { display:flex; }
   #triviaModal .box { background: var(--card); border:1px solid var(--line); border-radius:18px; padding:18px; max-width:460px; width:100%; }
@@ -124,6 +129,18 @@
   details.chips { margin-top: 12px; }
   details.chips summary { cursor: pointer; color: var(--muted); font-size: 14px; padding: 6px 0; }
   .tab[hidden] { display: none !important; }
+  .qbets { display: grid; grid-template-columns: repeat(4, 1fr); gap: 8px; margin-bottom: 10px; }
+  .qbets button { min-height: 48px; padding: 4px; font-size: 15px; }
+  .qbets button.sel { border-color: var(--green); color: var(--green); }
+  .dboard { margin-top: 12px; border-top: 1px solid var(--line); padding-top: 8px; }
+  .drow { display: grid; grid-template-columns: 1fr; gap: 6px; padding: 8px 0; border-top: 1px solid var(--line); }
+  .drow:first-child { border-top: 0; }
+  .drow .dn { font-weight: 700; font-size: 16px; display: flex; justify-content: space-between; gap: 8px; }
+  .drow .dn span { color: var(--amber); }
+  .drow .db { display: grid; grid-template-columns: repeat(4, 1fr); gap: 6px; }
+  .drow .db button { min-height: 46px; padding: 4px; font-size: 14px; }
+  .row2 { display: flex; gap: 8px; margin-top: 10px; }
+  .row2 button { flex: 1; }
   #onlinePanel.compact { padding: 10px 14px; }
   #onlinePanel.compact h2, #onlinePanel.compact #onlineLabel { display: none; }
   #onlinePanel.compact #onlineOn { display: grid; grid-template-columns: 1fr auto; align-items: center; gap: 2px 12px; }
@@ -396,6 +413,7 @@
     <div style="flex:1"><button type="button" class="btn-ghost" id="triviaPctBtn" style="width:100%">Set trivia</button></div>
   </div>
   <button type="button" class="btn-ghost mt" id="roundsBtn" style="width:100%">Rounds: On</button>
+  <button type="button" class="btn-ghost mt" id="autoBetBtn" style="width:100%">Repeat last wager: On</button>
   <div class="msg" id="feeMsg" role="status"></div>
 </div>
 
@@ -432,6 +450,10 @@
 <!-- effects layers (decorative) -->
 <canvas id="bg" aria-hidden="true"></canvas>
 <canvas id="fx" aria-hidden="true"></canvas>
+<div id="confirmModal" role="dialog" aria-modal="true"><div class="box">
+  <div class="tq" id="confirmText"></div>
+  <div class="row"><button type="button" class="btn-ghost" id="confirmNo" style="flex:1">Cancel</button><button type="button" id="confirmYes" style="flex:1">OK</button></div>
+</div></div>
 <div id="triviaModal" role="dialog" aria-modal="true"><div class="box">
   <div class="tcat" id="triviaCat"></div><div id="triviaBar"><i></i></div>
   <div class="tq" id="triviaQ"></div><div id="triviaOpts"></div>
@@ -1070,7 +1092,7 @@ var Core = (function () {
   var readOnly = false;      // viewer mode: never saves, never notifies
   var listeners = [];
 
-  function fresh() { return { players: [], nextId: 1, history: [], nextHid: 1, round: { n: 1, phase: 'betting' }, dealer: '', dealerReq: '', settings: { locked: false, maxBuyin: 0, bankFee: 10, bankLimit: 3, triviaPct: 10, rounds: false } }; }
+  function fresh() { return { players: [], nextId: 1, history: [], nextHid: 1, round: { n: 1, phase: 'betting' }, dealer: '', dealerReq: '', settings: { locked: false, maxBuyin: 0, bankFee: 10, bankLimit: 3, triviaPct: 10, rounds: false, autoBet: true } }; }
 
   function parseMoney(str) {
     if (typeof str !== 'string') return null;
@@ -1259,7 +1281,7 @@ var Core = (function () {
     }).map(function (p) {
       var q = { id: p.id, name: p.name, start: p.start, balance: p.balance, added: Number.isInteger(p.added) && p.added > 0 ? p.added : 0, takes: Number.isInteger(p.takes) && p.takes > 0 ? p.takes : 0 };
       var ni = function (v) { return Number.isInteger(v) && v > 0 ? v : 0; };
-      q.bet = ni(p.bet); q.hand = ni(p.hand); q.doubled = p.doubled === true; q.out = p.out === true;
+      q.last = ni(p.last); q.bet = ni(p.bet); q.hand = ni(p.hand); q.doubled = p.doubled === true; q.out = p.out === true;
       q.trivia = ni(p.trivia); q.triviaAt = Number.isInteger(p.triviaAt) ? p.triviaAt : -1; q.vin = ni(p.vin); q.vout = ni(p.vout);
       if (typeof p.owner === 'string' && p.owner) q.owner = p.owner;     // which device sits at this seat (online only)
       return q;
@@ -1268,7 +1290,7 @@ var Core = (function () {
     out.settings = { locked: st.locked === true, maxBuyin: Number.isInteger(st.maxBuyin) && st.maxBuyin > 0 ? st.maxBuyin : 0,
       bankFee: Number.isInteger(st.bankFee) && st.bankFee >= 0 && st.bankFee <= 50 ? st.bankFee : 10,
       bankLimit: Number.isInteger(st.bankLimit) && st.bankLimit >= 0 && st.bankLimit <= 20 ? st.bankLimit : 3,
-      triviaPct: Number.isInteger(st.triviaPct) && st.triviaPct >= 0 && st.triviaPct <= 20 ? st.triviaPct : 10, rounds: st.rounds === true };
+      triviaPct: Number.isInteger(st.triviaPct) && st.triviaPct >= 0 && st.triviaPct <= 20 ? st.triviaPct : 10, rounds: st.rounds === true, autoBet: st.autoBet !== false };
     var rd = s.round && typeof s.round === 'object' ? s.round : {};
     out.round = { n: Number.isInteger(rd.n) && rd.n > 0 ? rd.n : 1, phase: rd.phase === 'playing' ? 'playing' : 'betting' };
     out.dealer = typeof s.dealer === 'string' ? s.dealer : ''; out.dealerReq = typeof s.dealerReq === 'string' ? s.dealerReq : '';
@@ -1302,7 +1324,7 @@ var Core = (function () {
     if (!n) return false;
     n.players.forEach(function (p) { delete p.owner; p.bet = 0; p.hand = 0; p.doubled = false; p.out = false; });
     n.round = { n: 1, phase: 'betting' }; n.dealer = ''; n.dealerReq = '';
-    n.settings = { locked: false, maxBuyin: 0, bankFee: n.settings.bankFee, bankLimit: n.settings.bankLimit, triviaPct: n.settings.triviaPct, rounds: false };
+    n.settings = { locked: false, maxBuyin: 0, bankFee: n.settings.bankFee, bankLimit: n.settings.bankLimit, triviaPct: n.settings.triviaPct, rounds: false, autoBet: true };
     readOnly = false;
     state = n;
     save();
@@ -1913,6 +1935,8 @@ var Core = (function () {
     $('hostTools').hidden = online.role !== 'host';
     $('roundsBtn').textContent = 'Rounds: ' + (Core.state.settings.rounds ? 'On' : 'Off');
     $('roundsBtn').hidden = !online.role;
+    $('autoBetBtn').hidden = !online.role || !Core.state.settings.rounds;
+    $('autoBetBtn').textContent = 'Repeat last wager: ' + (Core.state.settings.autoBet ? 'On' : 'Off');
     $('lockBtn').textContent = locked ? 'Resume players' : 'Pause players';
     $('lockBanner').hidden = !(pr && locked);
     if (pr && !$('addPanel').hidden && !nameEl.value) nameEl.value = lsGet(NAME_KEY) || '';   // pre-fill only while the form is showing
@@ -2011,6 +2035,15 @@ var Core = (function () {
         var lab0 = el('label', null, p.out ? 'Sitting out' : (p.bet > 0 ? 'Wager locked in' : 'Wager for this round')); lab0.setAttribute('for', 'w' + p.id);
         wrap0.appendChild(lab0);
         if (!p.out) {
+          var qb = el('div', 'qbets');
+          var seenQ = {};
+          [0.05, 0.1, 0.25, 0.5].forEach(function (f) {
+            var c = Math.max(100, Math.round(p.balance * f / 100) * 100); if (c > p.balance) c = p.balance;
+            if (c < 1 || seenQ[c]) return; seenQ[c] = 1;
+            var qbtn = el('button', 'btn-ghost' + (p.bet === c ? ' sel' : ''), Core.fmt(c)); qbtn.type = 'button';
+            qbtn.setAttribute('data-action', 'qbet'); qbtn.setAttribute('data-amt', String(c)); qb.appendChild(qbtn);
+          });
+          wrap0.appendChild(qb);
           var inp0 = el('input'); inp0.type = 'text'; inp0.id = 'w' + p.id;
           inp0.setAttribute('inputmode', 'decimal'); inp0.setAttribute('autocomplete', 'off');
           inp0.placeholder = 'Wager $'; inp0.setAttribute('data-wager', p.id);
@@ -2162,7 +2195,8 @@ var Core = (function () {
       case 'bet':
         c = Core.checkWager(a.wagerText); if (!c.ok) return c;
         body = { type: 'bet', pid: a.pid, amount: c.cents }; break;
-      case 'start': body = { type: 'start' }; break;
+      case 'start': body = { type: 'start' }; if (a.force) body.force = true; break;
+      case 'finish': body = { type: 'finish' }; break;
       case 'dbl': body = { type: 'double', pid: a.pid }; break;
       case 'sitout': body = { type: 'sitout', pid: a.pid, out: !!a.out }; break;
       case 'dealer': body = { type: 'dealer_' + a.op }; if (a.ref !== undefined) body.ref = a.ref; break;
@@ -2192,6 +2226,21 @@ var Core = (function () {
     }
   }
 
+  var confirmDone = null;
+  function askConfirm(text, okLabel, danger) {                // an in-page dialog: window.confirm gets silently blocked on some phones
+    return new Promise(function (resolve) {
+      if (confirmDone) confirmDone(false);
+      $('confirmText').textContent = text;
+      $('confirmYes').textContent = okLabel || 'OK';
+      $('confirmYes').className = danger ? 'danger' : '';
+      $('confirmModal').className = 'on';
+      confirmDone = function (v) { $('confirmModal').className = ''; confirmDone = null; resolve(v); };
+    });
+  }
+  $('confirmYes').addEventListener('click', function (e) { e.preventDefault(); if (confirmDone) confirmDone(true); });
+  $('confirmNo').addEventListener('click', function (e) { e.preventDefault(); if (confirmDone) confirmDone(false); });
+  $('confirmModal').addEventListener('click', function (e) { if (e.target === $('confirmModal') && confirmDone) confirmDone(false); });
+
   function wagerInput(card) { var i = card.querySelector('input[data-wager]'); return i ? i.value : ''; }
   function sfxSafe(n) { try { sfx(n); } catch (e) {} }
 
@@ -2216,6 +2265,25 @@ var Core = (function () {
       bar.appendChild(sb);
     }
     box.appendChild(bar);
+    if (iDeal() && t.round.phase === 'betting' && waiting.length && ready.length > waiting.length) {
+      var sa = el('button', 'btn-ghost mt', 'Start now without ' + waiting.map(function (p) { return p.name; }).join(', ')); sa.type = 'button';
+      sa.setAttribute('data-r', 'start'); sa.setAttribute('data-force', '1'); sa.style.width = '100%'; box.appendChild(sa);
+    }
+    if (iDeal() && t.round.phase === 'playing' && inHand.length) {          // settle everyone from one place
+      var board = el('div', 'dboard');
+      inHand.forEach(function (p) {
+        var rowd = el('div', 'drow');
+        var dn = el('div', 'dn', p.name); dn.appendChild(el('span', null, Core.fmt(p.hand) + (p.doubled ? ' ×2' : '')));
+        rowd.appendChild(dn);
+        var db = el('div', 'db');
+        [['win', 'Win', 'o-win'], ['blackjack', 'BJ 3:2', 'o-bj'], ['push', 'Push', 'o-push'], ['loss', 'Loss', 'o-loss']].forEach(function (o) {
+          var bb = el('button', o[2], o[1]); bb.type = 'button'; bb.setAttribute('data-r', 'settle'); bb.setAttribute('data-pid', p.id); bb.setAttribute('data-o', o[0]); db.appendChild(bb);
+        });
+        rowd.appendChild(db); board.appendChild(rowd);
+      });
+      box.appendChild(board);
+      var fin = el('button', 'btn-ghost mt', 'Push all remaining hands'); fin.type = 'button'; fin.setAttribute('data-r', 'finish'); fin.style.width = '100%'; box.appendChild(fin);
+    }
     var msg = '';
     if (t.round.phase === 'betting') msg = !ready.length ? 'Nobody can play yet.' : waiting.length ? 'Waiting for wagers: ' + waiting.map(function (p) { return p.name; }).join(', ') : 'All wagers are in. The dealer can start.';
     else msg = inHand.length + ' hand' + (inHand.length === 1 ? '' : 's') + ' still to settle: ' + inHand.map(function (p) { return p.name; }).join(', ') + '. Once yours is settled, you can wager for the next round.';
@@ -2247,7 +2315,12 @@ var Core = (function () {
     e.preventDefault(); busy = true;
     try {
       var r = btn.getAttribute('data-r'), res;
-      if (r === 'start') { res = await perform({ type: 'start' }); if (res.ok) { sfxSafe('ding'); toast('Round ' + res.n + ' started. Good luck!'); } }
+      if (r === 'start') { res = await perform({ type: 'start', force: btn.getAttribute('data-force') === '1' }); if (res.ok) { sfxSafe('ding'); toast('Round ' + res.n + ' started. Good luck!'); } }
+      else if (r === 'settle') {
+        res = await perform({ type: 'settle', pid: parseInt(btn.getAttribute('data-pid'), 10), outcome: btn.getAttribute('data-o'), wagerText: '' });
+        if (res.ok) { renderLocal(); return; }
+      }
+      else if (r === 'finish') { res = await perform({ type: 'finish' }); }
       else res = await perform({ type: 'dealer', op: btn.getAttribute('data-op'), ref: btn.getAttribute('data-ref') === null ? undefined : btn.getAttribute('data-ref') });
       render();
       if (!res.ok && $('roundMsg')) $('roundMsg').textContent = res.error;
@@ -2359,6 +2432,16 @@ var Core = (function () {
       if (res.ok) { $('triviaPct').value = ''; render(); }
     } finally { busy = false; }
   });
+  $('autoBetBtn').addEventListener('click', async function (e) {
+    e.preventDefault(); if (busy || isPlayer() || !online.role) return;
+    busy = true;
+    try {
+      var res = await perform({ type: 'settings', settings: { autoBet: !Core.state.settings.autoBet } });
+      $('feeMsg').textContent = res.ok ? (Core.state.settings.autoBet ? 'Each player\'s last wager is locked in again for the next round.' : 'Players enter a new wager every round.') : res.error;
+      $('feeMsg').className = 'msg' + (res.ok ? ' ok' : '');
+      if (res.ok) render();
+    } finally { busy = false; }
+  });
   $('roundsBtn').addEventListener('click', async function (e) {
     e.preventDefault(); if (busy || isPlayer()) return;
     busy = true;
@@ -2400,7 +2483,7 @@ var Core = (function () {
   $('resetBtn').addEventListener('click', async function (e) {
     e.preventDefault();
     if (isPlayer() || busy || !Core.state.players.length) return;
-    if (!window.confirm('Reset every balance to its starting amount? This also clears recent hands.')) return;
+    if (!(await askConfirm('Reset every balance to its starting amount? This also clears recent hands.', 'Reset', true))) return;
     busy = true;
     try {
       var res = await perform({ type: 'reset' });
@@ -2451,7 +2534,7 @@ var Core = (function () {
         var p = null;
         Core.state.players.forEach(function (x) { if (x.id === id) p = x; });
         var leaving = isPlayer() && p && p.owner === myRef;
-        if (!p || !window.confirm(leaving ? 'Leave the table? You can sit down again later.' : 'Remove ' + p.name + '?')) return;
+        if (!p || !(await askConfirm(leaving ? 'Leave the table? You can sit down again later.' : 'Remove ' + p.name + '?', leaving ? 'Leave' : 'Remove', true))) return;
         var rr = await perform({ type: 'remove', pid: id });
         if (!rr.ok) { results[id] = { text: rr.error, cls: 'err' }; render(); return; }
         delete wagers[id]; delete results[id]; delete chipsText[id]; delete chipsOpen[id];
@@ -2459,9 +2542,12 @@ var Core = (function () {
         return;
       }
 
-      if (action === 'bet' || action === 'dbl' || action === 'sitout' || action === 'makedealer') {
+      if (action === 'bet' || action === 'qbet' || action === 'dbl' || action === 'sitout' || action === 'makedealer') {
         var rq;
-        if (action === 'bet') {
+        if (action === 'qbet') {
+          rq = await perform({ type: 'bet', pid: id, wagerText: String(parseInt(btn.getAttribute('data-amt'), 10) / 100) });
+          if (rq.ok) { delete wagers[id]; sfxSafe('coin'); }
+        } else if (action === 'bet') {
           var bt = card.querySelector('input[data-wager]').value; wagers[id] = bt;
           rq = await perform({ type: 'bet', pid: id, wagerText: bt });
           if (rq.ok) { delete wagers[id]; results[id] = { text: 'Wager locked in.', cls: 'pos' }; }
@@ -2621,7 +2707,7 @@ var Core = (function () {
     render();
     pollOnce();
     if (pollTimer) clearInterval(pollTimer);
-    pollTimer = setInterval(pollOnce, 2500);
+    pollTimer = setInterval(pollOnce, 1500);
   }
 
   async function hostTable() {
@@ -2670,9 +2756,9 @@ var Core = (function () {
   $('hostBtn').addEventListener('click', function (e) { e.preventDefault(); hostTable(); });
   $('joinBtn').addEventListener('click', function (e) { e.preventDefault(); joinTable(); });
   $('joinCode').addEventListener('keydown', function (e) { if (e.key === 'Enter') { e.preventDefault(); joinTable(); } });
-  $('leaveBtn').addEventListener('click', function (e) {
+  $('leaveBtn').addEventListener('click', async function (e) {
     e.preventDefault();
-    if (online.role === 'host' && !window.confirm('Stop hosting? Players will lose the table. You keep the game on this phone.')) return;
+    if (online.role === 'host' && !(await askConfirm('Stop hosting? Players will lose the table. You keep the game on this phone.', 'Stop hosting', true))) return;
     clearOnline('');
   });
 
@@ -2947,12 +3033,12 @@ var Core = (function () {
   }
   $('adminKeyBtn').addEventListener('click', function (e) { e.preventDefault(); unlockAdmin(); });
   $('adminKeyInput').addEventListener('keydown', function (ev) { if (ev.key === 'Enter') { ev.preventDefault(); unlockAdmin(); } });
-  $('adminList').addEventListener('click', function (e) {
+  $('adminList').addEventListener('click', async function (e) {
     var b = e.target.closest ? e.target.closest('button[data-act]') : null;
     if (!b) return;
     e.preventDefault();
     var act = b.getAttribute('data-act');
-    if (act === 'remove' && !window.confirm('Remove this person? They can ask for access again.')) return;
+    if (act === 'remove' && !(await askConfirm('Remove this person? They can ask for access again.', 'Remove', true))) return;
     adminAct(b.getAttribute('data-ref'), act);
   });
 

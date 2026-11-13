@@ -58,7 +58,7 @@ function fmt(cents) {
 
 const nn = n => Number.isInteger(n) && n > 0 ? n : 0;
 const newPlayer = (id, name, start, owner) => {
-  const p = { id, name, start, balance: start, added: 0, takes: 0, bet: 0, hand: 0, doubled: false, out: false, trivia: 0, triviaAt: -1, vin: 0, vout: 0 };
+  const p = { id, name, start, balance: start, added: 0, takes: 0, bet: 0, hand: 0, doubled: false, out: false, last: 0, trivia: 0, triviaAt: -1, vin: 0, vout: 0 };
   if (owner) p.owner = owner;
   return p;
 };
@@ -69,7 +69,7 @@ export function normalizeTable(t) {
     const q = { id: p.id, name: String(p.name), start: p.start, balance: p.balance,
       added: nn(p.added),                                    // chips taken from the bank after the buy-in (so net profit is honest)
       takes: nn(p.takes),                                    // how many times they went to the bank
-      bet: nn(p.bet), hand: nn(p.hand), doubled: p.doubled === true, out: p.out === true,   // round play: next wager, wager in play, sitting out
+      bet: nn(p.bet), hand: nn(p.hand), doubled: p.doubled === true, out: p.out === true, last: nn(p.last),   // round play: next wager, wager in play, sitting out, last round's wager (for auto-repeat)
       trivia: nn(p.trivia), triviaAt: Number.isInteger(p.triviaAt) ? p.triviaAt : -1,        // trivia winnings so far, and the match they last answered in
       vin: nn(p.vin), vout: nn(p.vout) };                    // chips moved in from / out to the savings vault
     if (typeof p.owner === 'string' && p.owner) q.owner = p.owner;
@@ -92,7 +92,8 @@ export function normalizeTable(t) {
       bankFee: Number.isInteger(st.bankFee) && st.bankFee >= 0 && st.bankFee <= 50 ? st.bankFee : 10,        // % kept by the bank when chips are taken
       bankLimit: Number.isInteger(st.bankLimit) && st.bankLimit >= 0 && st.bankLimit <= 20 ? st.bankLimit : 3,   // max bank trips per player (0 = no limit)
       triviaPct: Number.isInteger(st.triviaPct) && st.triviaPct >= 0 && st.triviaPct <= 20 ? st.triviaPct : 10, // trivia can pay up to this % of each player's buy-in
-      rounds: st.rounds === false ? false : true },          // rounds: wagers -> dealer Start -> hands -> next round
+      rounds: st.rounds === false ? false : true,
+      autoBet: st.autoBet === false ? false : true },        // repeat each player's last wager for the next round (they can still change it)          // rounds: wagers -> dealer Start -> hands -> next round
   };
 }
 
@@ -118,8 +119,12 @@ export function applyAction(t, actor, a, ctx) {
   };
   const overMax = c => t.settings.maxBuyin && c > t.settings.maxBuyin ? 'The host set a max of ' + fmt(t.settings.maxBuyin) + ' per buy-in.' : null;
   const matchKey = () => rounds ? t.round.n : t.nextHid;       // trivia: one question per round (or per hand in quick mode)
+  const autoBets = () => {
+    if (!t.settings.autoBet) return;
+    t.players.forEach(p => { if (!p.out && !dealerSeat(p) && p.last > 0 && p.balance > 0 && !(p.bet > 0)) p.bet = Math.min(p.last, p.balance); });
+  };
   const roundOver = () => {
-    if (rounds && t.round.phase === 'playing' && !t.players.some(p => p.hand > 0)) { t.round.phase = 'betting'; t.round.n += 1; }
+    if (rounds && t.round.phase === 'playing' && !t.players.some(p => p.hand > 0)) { t.round.phase = 'betting'; t.round.n += 1; autoBets(); }
   };
   const handsInPlay = () => t.players.some(p => p.hand > 0);
 
@@ -162,16 +167,30 @@ export function applyAction(t, actor, a, ctx) {
       if (!rounds) return deny('Rounds are off.');
       if (!dealerPower) return deny('Only the dealer can start the round.');
       if (t.round.phase !== 'betting') return deny('A round is already in play.');
-      const ready = t.players.filter(p => !p.out && p.balance > 0 && !dealerSeat(p));
-      if (!ready.length) return deny('Nobody can play yet: players need chips and must not be sitting out.');
-      const waiting = ready.filter(p => !(p.bet > 0));
-      if (waiting.length) return deny('Waiting for wagers from: ' + waiting.map(p => p.name).join(', ') + '.');
+      const eligible = t.players.filter(p => !p.out && p.balance > 0 && !dealerSeat(p));
+      if (!eligible.length) return deny('Nobody can play yet: players need chips and must not be sitting out.');
+      const waiting = eligible.filter(p => !(p.bet > 0));
+      let ready = eligible;
+      if (waiting.length) {                          // "start anyway": players without a wager just skip this round
+        if (a.force !== true) return deny('Waiting for wagers from: ' + waiting.map(p => p.name).join(', ') + '.');
+        ready = eligible.filter(p => p.bet > 0);
+        if (!ready.length) return deny('Nobody has locked in a wager yet.');
+      }
       const over = ready.find(p => p.bet > p.balance);
       if (over) return deny(over.name + ' wagered more than their balance.');
-      ready.forEach(p => { p.hand = p.bet; p.bet = 0; p.doubled = false; });
+      ready.forEach(p => { p.hand = p.bet; p.last = p.bet; p.bet = 0; p.doubled = false; });
       t.players.forEach(p => { if (!ready.includes(p)) p.bet = 0; });
       t.round.phase = 'playing';
-      return { ok: true, n: t.round.n, players: ready.length };
+      return { ok: true, n: t.round.n, players: ready.length, skipped: waiting.length && a.force === true ? waiting.length : 0 };
+    }
+    case 'finish': {                                 // dealer: close out the round, every unsettled hand is a push
+      if (!rounds) return deny('Rounds are off.');
+      if (!dealerPower) return deny('Only the dealer can do that.');
+      if (t.round.phase !== 'playing') return deny('No round in play.');
+      let n = 0;
+      t.players.forEach(p => { if (p.hand > 0) { logHand(p, 'push', p.hand, 0); p.hand = 0; p.doubled = false; n++; } });
+      roundOver();
+      return { ok: true, n };
     }
     case 'double': {                                 // double the wager mid-hand
       if (!rounds) return deny('Rounds are off.');
@@ -192,6 +211,7 @@ export function applyAction(t, actor, a, ctx) {
       if (p.hand > 0) return deny('Your hand is in play.');
       p.out = a.out === true;
       if (p.out) p.bet = 0;
+      else if (t.round.phase === 'betting' && !(p.bet > 0) && !dealerSeat(p) && t.settings.autoBet && p.last > 0 && p.balance > 0) p.bet = Math.min(p.last, p.balance);
       return { ok: true };
     }
     case 'settle': {
@@ -300,7 +320,11 @@ export function applyAction(t, actor, a, ctx) {
       const h = t.history[idx];
       if (h.outcome === 'vault_in' || h.outcome === 'vault_out') return deny('Vault moves can not be undone.');
       const hand = ['win', 'loss', 'blackjack', 'push'].includes(h.outcome);
-      if (rounds && hand && t.round.phase !== 'playing') return deny('That round is over, so its hands can no longer be undone.');
+      if (rounds && hand && t.round.phase !== 'playing') {
+        if (idx !== t.history.length - 1 || t.round.n < 2) return deny('That round is over, so its hands can no longer be undone.');
+        t.round.n -= 1; t.round.phase = 'playing';   // the last hand of the round was a mistake: reopen the round
+        t.players.forEach(x => { x.bet = 0; });
+      }
       t.history.splice(idx, 1);
       const p = find(h.pid);
       if (p) {
@@ -322,7 +346,7 @@ export function applyAction(t, actor, a, ctx) {
     }
     case 'reset': {
       if (!host) return deny('Only the host can reset the table.');
-      t.players.forEach(p => { p.balance = p.start; p.added = 0; p.takes = 0; p.bet = 0; p.hand = 0; p.doubled = false; p.out = false; p.trivia = 0; p.triviaAt = -1; p.vin = 0; p.vout = 0; });
+      t.players.forEach(p => { p.balance = p.start; p.added = 0; p.takes = 0; p.bet = 0; p.hand = 0; p.doubled = false; p.out = false; p.last = 0; p.trivia = 0; p.triviaAt = -1; p.vin = 0; p.vout = 0; });
       t.history = [];
       t.round = { n: 1, phase: 'betting' };
       return { ok: true };
@@ -383,6 +407,10 @@ export function applyAction(t, actor, a, ctx) {
       if (a.triviaPct !== undefined) {
         if (!Number.isInteger(a.triviaPct) || a.triviaPct < 0 || a.triviaPct > 20) return deny('Trivia bonus must be a whole number from 0 to 20 (percent of the starting chips).');
         t.settings.triviaPct = a.triviaPct;
+      }
+      if (a.autoBet !== undefined) {
+        if (typeof a.autoBet !== 'boolean') return deny('Bad setting.');
+        t.settings.autoBet = a.autoBet;
       }
       if (a.rounds !== undefined) {
         if (typeof a.rounds !== 'boolean') return deny('Bad setting.');

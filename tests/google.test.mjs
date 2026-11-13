@@ -1,0 +1,37 @@
+import {verifyIdToken as V, Registry as R} from './w.mjs';
+import {webcrypto as c} from 'node:crypto';
+import assert from 'node:assert';
+const CID='cid.apps.googleusercontent.com', now=2000000000;
+const kp=await c.subtle.generateKey({name:'RSASSA-PKCS1-v1_5',modulusLength:2048,publicExponent:new Uint8Array([1,0,1]),hash:'SHA-256'},true,['sign','verify']);
+const jwk={...(await c.subtle.exportKey('jwk',kp.publicKey)),kid:'k1',alg:'RS256'};
+const b=o=>Buffer.from(typeof o==='string'?o:JSON.stringify(o)).toString('base64url');
+async function tok(over={},hdr={}){const h=b({alg:'RS256',kid:'k1',...hdr}),p=b({aud:CID,iss:'https://accounts.google.com',exp:now+3000,iat:now-10,email:'Friend@Gmail.com',email_verified:true,name:'Fri End',...over});
+ const sig=Buffer.from(await c.subtle.sign('RSASSA-PKCS1-v1_5',kp.privateKey,new TextEncoder().encode(h+'.'+p))).toString('base64url');return h+'.'+p+'.'+sig;}
+let n=0;const ok=(x,m)=>{assert.ok(x,m);n++;console.log('PASS',m)};
+let r=await V(await tok(),[jwk],CID,now); ok(r&&r.email==='friend@gmail.com'&&r.name==='Fri End','valid token accepted, email lower-cased');
+ok(!await V(await tok({aud:'other'}),[jwk],CID,now),'wrong audience rejected');
+ok(!await V(await tok({exp:now-1}),[jwk],CID,now),'expired rejected');
+ok(!await V(await tok({iss:'https://evil.com'}),[jwk],CID,now),'wrong issuer rejected');
+ok(!await V(await tok({email_verified:false}),[jwk],CID,now),'unverified email rejected');
+ok(!await V(await tok({},{kid:'zzz'}),[jwk],CID,now),'unknown key rejected');
+ok(!await V(await tok({},{alg:'none'}),[jwk],CID,now),'alg none rejected');
+const t=await tok(); const parts=t.split('.'); parts[1]=b({aud:CID,iss:'accounts.google.com',exp:now+99,email:'admin@x.com',email_verified:true});
+ok(!await V(parts.join('.'),[jwk],CID,now),'tampered payload rejected');
+ok(!await V('garbage',[jwk],CID,now),'garbage rejected');
+// registry
+const store=new Map(); const st={storage:{get:async k=>store.get(k),put:async(k,v)=>void store.set(k,v),delete:async k=>void store.delete(k),list:async({prefix})=>new Map([...store].filter(([k])=>k.startsWith(prefix)))}};
+const reg=new R(st); const call=async(path,body)=>(await reg.fetch(new Request('https://x'+path,{method:'POST',body:JSON.stringify(body)}))).json();
+const D1='a'.repeat(32),D2='b'.repeat(32);
+let s=await call('/google',{deviceId:D1,email:'f@g.com',name:'F'}); ok(s.status==='pending','new Google account starts pending');
+ok((await call('/status',{deviceId:D1})).status==='pending','device status follows account');
+let list=(await call('/list')).devices; ok(list.length===1&&list[0].email==='f@g.com','admin list shows the email');
+await call('/action',{ref:list[0].ref,action:'approve'});
+ok((await call('/status',{deviceId:D1})).status==='approved','approval by ref works');
+await call('/google',{deviceId:D2,email:'f@g.com',name:'F'});
+const a1=await call('/status',{deviceId:D1}),a2=await call('/status',{deviceId:D2});
+ok(a2.status==='approved'&&a1.ref===a2.ref,'second phone gets the same ref (seat + vault follow the account)');
+let pre=await call('/preapprove',{email:'new@g.com'}); await call('/google',{deviceId:'c'.repeat(32),email:'new@g.com',name:'N'});
+ok((await call('/status',{deviceId:'c'.repeat(32)})).status==='approved','pre-approved email is let straight in');
+await call('/action',{ref:a1.ref,action:'block'}); ok((await call('/status',{deviceId:D2})).status==='blocked','block applies to every phone on the account');
+await call('/action',{ref:a1.ref,action:'remove'}); ok((await call('/status',{deviceId:D1})).status==='none','remove forgets the account');
+console.log('ALL',n,'GOOGLE CHECKS PASSED');
