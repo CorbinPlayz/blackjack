@@ -97,6 +97,22 @@
   .outcomes.two button { min-height: 46px; font-size: 14px; }
   .badge { display: inline-block; margin-left: 8px; padding: 2px 8px; border-radius: 999px; background: var(--green); color: #04130a; font-size: 11px; font-weight: 800; letter-spacing: .6px; vertical-align: middle; }
   .player.mine { border-color: var(--green); }
+  .rbar { display:flex; align-items:center; justify-content:space-between; gap:10px; flex-wrap:wrap; }
+  .rbar .big { font-size:20px; font-weight:800; }
+  .rbar .sub2 { color: var(--muted, #9aa59d); font-size:13px; margin-top:2px; }
+  .btn-start { background: var(--green); color:#06150c; font-weight:800; border:0; border-radius:12px; min-height:52px; padding:0 22px; font-size:18px; }
+  .btn-start[disabled] { opacity:.4; }
+  .locked { color: var(--green); font-weight:700; margin:6px 0; }
+  .inplay { font-weight:800; font-size:18px; margin:8px 0; }
+  #triviaModal { position:fixed; inset:0; background:rgba(0,0,0,.78); z-index:60; display:none; align-items:center; justify-content:center; padding:16px; }
+  #triviaModal.on { display:flex; }
+  #triviaModal .box { background: var(--card); border:1px solid var(--line); border-radius:18px; padding:18px; max-width:460px; width:100%; }
+  #triviaModal .tq { font-size:19px; font-weight:700; margin:8px 0 14px; }
+  #triviaModal .tcat { color: var(--green); font-size:12px; text-transform:uppercase; letter-spacing:.08em; }
+  #triviaModal .topt { display:block; width:100%; margin-bottom:8px; text-align:left; }
+  #triviaModal .topt.good { background:#1f6f3f; } #triviaModal .topt.bad { background:#7a2222; }
+  #triviaBar { height:6px; background:#222; border-radius:4px; overflow:hidden; margin-bottom:6px; }
+  #triviaBar i { display:block; height:100%; background:var(--green); width:100%; }
   .player.view { opacity: .92; }
   details.chips { margin-top: 12px; }
   details.chips summary { cursor: pointer; color: var(--muted); font-size: 14px; padding: 6px 0; }
@@ -274,6 +290,7 @@
     <div style="flex:3"><input type="text" id="newName" placeholder="Name" autocomplete="off" autocapitalize="words" maxlength="30"></div>
     <div style="flex:2"><input type="text" id="newStart" placeholder="Chips $" inputmode="decimal" autocomplete="off"></div>
   </div>
+  <label id="fromVaultRow" hidden style="display:none;margin:8px 0"><input type="checkbox" id="fromVault"> <span id="fromVaultTxt">Use saved chips from my vault</span></label>
   <button type="button" class="btn-add" id="addBtn">Add Player</button>
   <div class="msg" id="addMsg" role="status"></div>
 </div>
@@ -295,7 +312,24 @@
     <div style="flex:2"><input type="text" id="bankLimit" placeholder="Max trips per player (0 = no limit)" inputmode="numeric" autocomplete="off"></div>
     <div style="flex:1"><button type="button" class="btn-ghost" id="bankLimitBtn" style="width:100%">Set limit</button></div>
   </div>
+  <div class="row mt">
+    <div style="flex:2"><input type="text" id="triviaPct" placeholder="Trivia bonus % of buy-in (0 to 20)" inputmode="numeric" autocomplete="off"></div>
+    <div style="flex:1"><button type="button" class="btn-ghost" id="triviaPctBtn" style="width:100%">Set trivia</button></div>
+  </div>
+  <button type="button" class="btn-ghost mt" id="roundsBtn" style="width:100%">Rounds: On</button>
   <div class="msg" id="feeMsg" role="status"></div>
+</div>
+
+<div class="panel" id="roundPanel" hidden></div>
+<div class="panel" id="vaultPanel" hidden>
+  <h2>Your vault</h2>
+  <div class="online-status" id="vaultInfo">Chips you save here stay yours between games.</div>
+  <div class="row">
+    <div style="flex:2"><input type="text" id="vaultAmt" placeholder="Chips $" inputmode="decimal" autocomplete="off"></div>
+    <div style="flex:1"><button type="button" class="btn-ghost" id="vaultSave" style="width:100%">Save</button></div>
+    <div style="flex:1"><button type="button" class="btn-ghost" id="vaultTake" style="width:100%">Withdraw</button></div>
+  </div>
+  <div class="msg" id="vaultMsg" role="status"></div>
 </div>
 
 <div class="panel" id="standingsPanel" hidden>
@@ -330,6 +364,12 @@
 <!-- effects layers (decorative) -->
 <canvas id="bg" aria-hidden="true"></canvas>
 <canvas id="fx" aria-hidden="true"></canvas>
+<div id="triviaModal" role="dialog" aria-modal="true"><div class="box">
+  <div class="tcat" id="triviaCat"></div><div id="triviaBar"><i></i></div>
+  <div class="tq" id="triviaQ"></div><div id="triviaOpts"></div>
+  <div class="msg" id="triviaMsg" role="status"></div>
+  <button type="button" class="btn-ghost" id="triviaClose" style="width:100%">Close</button>
+</div></div>
 <div id="fxLayer" aria-hidden="true"></div>
 <div id="flash" aria-hidden="true"></div>
 <div id="toast" role="status"></div>
@@ -345,6 +385,614 @@
   <div class="bjwho" id="bjWho"></div>
 </div>
 
+<script type="text/plain" id="triviaData">
+#Science
+What is the chemical symbol for gold?|Au|Ag|Gd|Fe
+How many bones are in the adult human body?|206|186|226|256
+What gas do plants absorb from the air?|Carbon dioxide|Oxygen|Nitrogen|Helium
+What is the hardest natural substance?|Diamond|Quartz|Steel|Granite
+What is H2O commonly known as?|Water|Hydrogen peroxide|Salt|Ammonia
+What is the powerhouse of the cell?|Mitochondria|Nucleus|Ribosome|Golgi body
+At sea level, water boils at how many degrees Celsius?|100|90|110|120
+What is the largest organ of the human body?|Skin|Liver|Heart|Lungs
+What force keeps us on the ground?|Gravity|Magnetism|Friction|Inertia
+What is the chemical symbol for sodium?|Na|So|Sd|Nu
+Which blood type is the universal donor for red cells?|O negative|AB positive|A positive|B negative
+What is the study of fungi called?|Mycology|Virology|Botany|Entomology
+How many chambers does a human heart have?|Four|Two|Three|Five
+What is the speed of light closest to?|300,000 km per second|30,000 km per second|3,000,000 km per second|150,000 km per second
+What is the most abundant gas in Earth's atmosphere?|Nitrogen|Oxygen|Carbon dioxide|Argon
+What is the chemical symbol for iron?|Fe|Ir|In|I
+What is the pH of pure water?|7|1|10|14
+Which vitamin does sunlight help your body make?|Vitamin D|Vitamin C|Vitamin A|Vitamin B12
+What is the smallest unit of an element that keeps its properties?|Atom|Molecule|Cell|Compound
+What do you call a scientist who studies rocks?|Geologist|Biologist|Meteorologist|Archaeologist
+What is the chemical symbol for silver?|Ag|Au|Si|Sv
+Which organ pumps blood around the body?|Heart|Kidney|Stomach|Brain
+Sound cannot travel through what?|A vacuum|Water|Steel|Air
+What is the atomic number of hydrogen?|1|2|0|8
+What type of energy does a moving object have?|Kinetic|Potential|Thermal|Nuclear
+What is the chemical formula for table salt?|NaCl|KCl|NaOH|CaCO3
+How many legs does an insect have?|Six|Four|Eight|Ten
+What is the freezing point of water in Fahrenheit?|32|0|212|100
+Which scientist developed the theory of general relativity?|Albert Einstein|Isaac Newton|Niels Bohr|Galileo Galilei
+What is the shape of the DNA molecule called?|Double helix|Triple spiral|Single strand|Cross link
+What does a seismograph measure?|Earthquakes|Wind speed|Rainfall|Temperature
+What is the most abundant element in the Earth's crust?|Oxygen|Iron|Carbon|Hydrogen
+Who discovered penicillin?|Alexander Fleming|Louis Pasteur|Marie Curie|Joseph Lister
+What is the unit of electrical resistance?|Ohm|Volt|Watt|Ampere
+What is the SI unit of force?|Newton|Joule|Pascal|Hertz
+Which part of a plant does most of the photosynthesis?|Leaves|Roots|Stem|Seeds
+Which metal is liquid at room temperature?|Mercury|Lead|Tin|Zinc
+Which gas do humans breathe out?|Carbon dioxide|Oxygen|Hydrogen|Neon
+What color does blue litmus paper turn in acid?|Red|Blue|Green|Yellow
+What is the lightest element?|Hydrogen|Helium|Lithium|Carbon
+What do we call animals that eat only plants?|Herbivores|Carnivores|Omnivores|Insectivores
+What is the process by which a caterpillar becomes a butterfly?|Metamorphosis|Photosynthesis|Evolution|Hibernation
+What is the smallest bone in the human body?|Stapes|Femur|Radius|Clavicle
+What is the chemical symbol for potassium?|K|P|Po|Pt
+Which scientist is known for the laws of motion?|Isaac Newton|Charles Darwin|Nikola Tesla|Michael Faraday
+What type of rock forms from cooled lava?|Igneous|Sedimentary|Metamorphic|Fossil
+How many colors are traditionally listed in a rainbow?|Seven|Five|Six|Eight
+What is a huge collection of stars, gas and dust held together by gravity?|Galaxy|Asteroid|Comet|Eclipse
+Which gas makes up most of the Sun?|Hydrogen|Oxygen|Methane|Carbon dioxide
+What is the process plants use to make food from sunlight?|Photosynthesis|Respiration|Fermentation|Digestion
+What is the chemical symbol for copper?|Cu|Co|Cp|Cr
+How many pairs of chromosomes do humans normally have?|23|21|32|46 pairs
+#Space
+Which planet is closest to the Sun?|Mercury|Venus|Earth|Mars
+Which planet is known as the Red Planet?|Mars|Jupiter|Saturn|Mercury
+What is the largest planet in our solar system?|Jupiter|Saturn|Neptune|Earth
+Which planet has the most prominent rings?|Saturn|Mars|Venus|Mercury
+What is the name of our galaxy?|The Milky Way|Andromeda|Triangulum|Whirlpool
+Who was the first human in space?|Yuri Gagarin|Neil Armstrong|Buzz Aldrin|John Glenn
+Who was the first person to walk on the Moon?|Neil Armstrong|Buzz Aldrin|Yuri Gagarin|Alan Shepard
+In what year did humans first land on the Moon?|1969|1965|1972|1959
+How many planets are in our solar system?|Eight|Nine|Seven|Ten
+What is the hottest planet in our solar system?|Venus|Mercury|Mars|Jupiter
+What is the name of Earth's natural satellite?|The Moon|Phobos|Titan|Europa
+Which planet is tilted on its side so it spins like a rolling ball?|Uranus|Neptune|Saturn|Mars
+What is the closest star to Earth?|The Sun|Proxima Centauri|Sirius|Polaris
+What is a shooting star actually?|A meteor|A comet|A planet|A satellite
+Which planet has the Great Red Spot?|Jupiter|Mars|Saturn|Neptune
+What was the first artificial satellite, launched in 1957?|Sputnik 1|Explorer 1|Vostok 1|Apollo 1
+What do we call the path a planet takes around the Sun?|Orbit|Rotation|Equator|Axis
+About how long does Earth take to orbit the Sun?|365 days|30 days|100 days|700 days
+Which planet is the farthest from the Sun?|Neptune|Uranus|Saturn|Mars
+What is the name of the space telescope launched in 1990?|Hubble|Kepler|Spitzer|Chandra
+What is the largest moon of Saturn?|Titan|Europa|Io|Ganymede
+What is the largest moon in the solar system?|Ganymede|Titan|Callisto|Europa
+What is a star that explodes called?|Supernova|Pulsar|Quasar|Nebula
+What is at the center of our solar system?|The Sun|Jupiter|Earth|The Moon
+Which planet has the shortest year?|Mercury|Venus|Mars|Earth
+What is the name of the NASA rover that landed on Mars in 2021?|Perseverance|Curiosity|Opportunity|Spirit
+Which space shuttle broke apart in 1986?|Challenger|Columbia|Discovery|Atlantis
+What does NASA stand for?|National Aeronautics and Space Administration|National Air and Space Agency|North American Space Association|National Aerospace Science Authority
+Which planet is closest in size to Earth?|Venus|Mars|Mercury|Neptune
+How many moons does Earth have?|One|Two|Zero|Four
+What are the dark patches on the Sun called?|Sunspots|Craters|Black holes|Eclipses
+What force holds planets in orbit around the Sun?|Gravity|Magnetism|Friction|Radiation
+Which planet has a day longer than its year?|Venus|Mars|Jupiter|Mercury
+Who was the Apollo 11 command module pilot who stayed in orbit?|Michael Collins|Buzz Aldrin|Neil Armstrong|Jim Lovell
+Which dwarf planet was reclassified from planet status in 2006?|Pluto|Ceres|Eris|Haumea
+What is it called when the Moon blocks the Sun?|A solar eclipse|A lunar eclipse|A transit|An equinox
+What do we call a ball of ice and dust that grows a tail near the Sun?|A comet|An asteroid|A meteorite|A moon
+Which animal was the first to orbit the Earth, in 1957?|Laika the dog|A monkey named Ham|A chimpanzee named Enos|A cat named Felicette
+Which planet is nicknamed the Morning Star or Evening Star?|Venus|Mars|Mercury|Jupiter
+Which planet is known as the Ringed Planet?|Saturn|Neptune|Mars|Earth
+What is the name of the belt of rocks between Mars and Jupiter?|The asteroid belt|The Kuiper belt|The Van Allen belt|The Oort cloud
+How many planets are closer to the Sun than Earth?|Two|One|Three|Four
+#Geography
+What is the capital of France?|Paris|Lyon|Marseille|Nice
+What is the capital of Japan?|Tokyo|Osaka|Kyoto|Nagoya
+What is the capital of Australia?|Canberra|Sydney|Melbourne|Perth
+What is the capital of Canada?|Ottawa|Toronto|Vancouver|Montreal
+What is the capital of Brazil?|Brasilia|Rio de Janeiro|Sao Paulo|Salvador
+What is the capital of Egypt?|Cairo|Alexandria|Giza|Luxor
+What is the capital of Italy?|Rome|Milan|Venice|Naples
+What is the capital of Spain?|Madrid|Barcelona|Seville|Valencia
+What is the capital of Germany?|Berlin|Munich|Hamburg|Frankfurt
+What is the capital of Mexico?|Mexico City|Cancun|Guadalajara|Monterrey
+What is the capital of India?|New Delhi|Mumbai|Kolkata|Chennai
+What is the capital of South Korea?|Seoul|Busan|Incheon|Daegu
+What is the capital of Argentina?|Buenos Aires|Cordoba|Lima|Santiago
+What is the capital of Turkey?|Ankara|Istanbul|Izmir|Antalya
+What is the capital of Kenya?|Nairobi|Mombasa|Kampala|Dar es Salaam
+What is the capital of Nigeria?|Abuja|Lagos|Accra|Kano
+What is the capital of New Zealand?|Wellington|Auckland|Christchurch|Queenstown
+What is the capital of Thailand?|Bangkok|Phuket|Hanoi|Manila
+What is the capital of Sweden?|Stockholm|Gothenburg|Oslo|Helsinki
+What is the capital of Portugal?|Lisbon|Porto|Madrid|Faro
+Which is the largest ocean?|Pacific|Atlantic|Indian|Arctic
+Which is the longest river in Africa?|The Nile|The Congo|The Niger|The Zambezi
+Which country is the largest by area?|Russia|Canada|China|United States
+On which continent is the Sahara Desert?|Africa|Asia|Australia|South America
+What is the tallest mountain above sea level?|Mount Everest|K2|Kilimanjaro|Denali
+Which is the largest desert in the world?|Antarctica|Sahara|Gobi|Arabian
+Which country is shaped like a boot?|Italy|Greece|Spain|Portugal
+Which country is home to Machu Picchu?|Peru|Bolivia|Chile|Colombia
+Which river runs through Paris?|The Seine|The Thames|The Rhine|The Danube
+Which river runs through London?|The Thames|The Seine|The Tyne|The Mersey
+Marrakech is a city in which country?|Morocco|Tunisia|Egypt|Algeria
+What is the smallest country in the world?|Vatican City|Monaco|San Marino|Liechtenstein
+Which US state is the largest by area?|Alaska|Texas|California|Montana
+Which US state is nicknamed the Sunshine State?|Florida|California|Arizona|Hawaii
+What is the capital of California?|Sacramento|Los Angeles|San Francisco|San Diego
+What is the capital of Texas?|Austin|Houston|Dallas|San Antonio
+What is the capital of New York State?|Albany|New York City|Buffalo|Rochester
+Which Great Lake is entirely within the United States?|Lake Michigan|Lake Superior|Lake Erie|Lake Ontario
+Which country is made up of more than 17,000 islands?|Indonesia|Japan|Philippines|Greece
+What is the longest river in South America?|The Amazon|The Orinoco|The Parana|The Magdalena
+Which sea lies between Europe and Africa?|The Mediterranean Sea|The Red Sea|The Black Sea|The Baltic Sea
+Istanbul is a major city in which country?|Turkey|Greece|Iran|Egypt
+Which mountain range is the traditional border between Europe and Asia?|The Urals|The Alps|The Andes|The Rockies
+What is the highest waterfall in the world?|Angel Falls|Niagara Falls|Victoria Falls|Iguazu Falls
+In which country is the Great Barrier Reef?|Australia|Fiji|Indonesia|Philippines
+Which African country has the pyramids of Giza?|Egypt|Sudan|Libya|Ethiopia
+What is the capital of Scotland?|Edinburgh|Glasgow|Aberdeen|Dundee
+Which city is nicknamed the Big Apple?|New York City|Chicago|Los Angeles|Boston
+Which continent is almost entirely covered in ice?|Antarctica|Asia|Europe|Australia
+Which two countries share the longest international border?|Canada and the United States|Russia and China|Argentina and Chile|India and Pakistan
+What is the official language of Brazil?|Portuguese|Spanish|English|French
+Which country has the city of Cape Town?|South Africa|Namibia|Kenya|Australia
+#History
+Who was the first President of the United States?|George Washington|Thomas Jefferson|John Adams|Abraham Lincoln
+In what year did World War II end?|1945|1939|1950|1918
+In what year did Columbus first sail to the Americas?|1492|1452|1520|1607
+Who was the principal author of the Declaration of Independence?|Thomas Jefferson|Benjamin Franklin|George Washington|John Hancock
+Which ancient wonder in Egypt still stands today?|The Great Pyramid of Giza|The Colossus of Rhodes|The Hanging Gardens|The Lighthouse of Alexandria
+Who was the first woman to fly solo across the Atlantic?|Amelia Earhart|Bessie Coleman|Harriet Quimby|Jacqueline Cochran
+In what year did the Titanic sink?|1912|1905|1920|1898
+Who was the British Prime Minister for most of World War II?|Winston Churchill|Neville Chamberlain|Clement Attlee|Margaret Thatcher
+Which empire built the Colosseum?|The Roman Empire|The Greek Empire|The Ottoman Empire|The Persian Empire
+Which wall fell in 1989?|The Berlin Wall|The Great Wall|Hadrian's Wall|The Western Wall
+Who was the first Emperor of Rome?|Augustus|Julius Caesar|Nero|Caligula
+In which year did the American Civil War begin?|1861|1776|1812|1898
+Who was the US President during the American Civil War?|Abraham Lincoln|Ulysses S. Grant|Andrew Jackson|James Buchanan
+Who led the Indian independence movement using nonviolent protest?|Mahatma Gandhi|Jawaharlal Nehru|Subhas Chandra Bose|Bhagat Singh
+Which ship carried the Pilgrims to America in 1620?|The Mayflower|The Santa Maria|The Endeavour|The Beagle
+What was the name of the Wright brothers' first powered airplane?|The Wright Flyer|The Spirit of St. Louis|The Kitty Hawk Special|The Enola Gay
+Which French leader crowned himself emperor in 1804?|Napoleon Bonaparte|Louis XIV|Charles de Gaulle|Robespierre
+Which civilization built Machu Picchu?|The Inca|The Aztec|The Maya|The Olmec
+Which ancient civilization built the Parthenon?|The Greeks|The Romans|The Egyptians|The Persians
+Who was the first US president to live in the White House?|John Adams|George Washington|Thomas Jefferson|James Madison
+In what year did the United States declare independence?|1776|1789|1812|1620
+Which queen ruled Britain for 63 years until 1901?|Queen Victoria|Queen Elizabeth I|Queen Anne|Queen Mary
+What did Rosa Parks refuse to do in 1955?|Give up her bus seat|Pay a tax|Sign a petition|Leave her job
+Who gave the I Have a Dream speech?|Martin Luther King Jr.|Malcolm X|Barack Obama|Frederick Douglass
+Which US president signed the Emancipation Proclamation?|Abraham Lincoln|Ulysses S. Grant|Andrew Johnson|Thomas Jefferson
+What was the plague that killed millions in medieval Europe called?|The Black Death|The Spanish Flu|Smallpox|Cholera
+Who was Cleopatra?|Queen of Egypt|Empress of Rome|Goddess of Greece|Queen of Persia
+In which city was Julius Caesar assassinated?|Rome|Athens|Alexandria|Carthage
+Who was the first man to reach the South Pole, in 1911?|Roald Amundsen|Robert Falcon Scott|Ernest Shackleton|Edmund Hillary
+Who reached the summit of Everest with Tenzing Norgay in 1953?|Edmund Hillary|George Mallory|Reinhold Messner|Ernest Shackleton
+The Cold War was a rivalry between which two powers?|The USA and the Soviet Union|Britain and France|China and Japan|Germany and Italy
+Which country gave the Statue of Liberty to the United States?|France|England|Spain|Italy
+Which ancient people invented the Olympic Games?|The Greeks|The Romans|The Egyptians|The Chinese
+Who became South Africa's first president elected after apartheid?|Nelson Mandela|Desmond Tutu|F. W. de Klerk|Thabo Mbeki
+Whose expedition first sailed around the world, completing the trip in 1522?|Ferdinand Magellan|Christopher Columbus|James Cook|Marco Polo
+Which war was fought between the North and the South in the United States?|The Civil War|The Revolutionary War|The War of 1812|The Cold War
+Which Chinese structure was built to protect against invasions?|The Great Wall|The Forbidden City|The Terracotta Army|The Summer Palace
+Who invented the printing press in Europe around 1440?|Johannes Gutenberg|Leonardo da Vinci|Isaac Newton|Galileo Galilei
+Which Egyptian boy king's tomb was found in 1922?|Tutankhamun|Ramses II|Akhenaten|Khufu
+Which British Prime Minister was known as the Iron Lady?|Margaret Thatcher|Theresa May|Angela Merkel|Indira Gandhi
+Who was the US president for most of World War II?|Franklin D. Roosevelt|Harry Truman|Dwight Eisenhower|Herbert Hoover
+What did the Magna Carta limit?|The power of the king|Taxes on tea|Trade by sea|The size of armies
+Which Viking explorer is believed to have reached North America around the year 1000?|Leif Erikson|Erik the Red|Ragnar Lothbrok|Harald Hardrada
+In what year did the French Revolution begin?|1789|1776|1804|1815
+Which nurse of the Crimean War was known as the Lady with the Lamp?|Florence Nightingale|Clara Barton|Mary Seacole|Edith Cavell
+Which US president appears on the one-dollar bill?|George Washington|Abraham Lincoln|Thomas Jefferson|Benjamin Franklin
+Which US president appears on the five-dollar bill?|Abraham Lincoln|Alexander Hamilton|Andrew Jackson|Ulysses S. Grant
+Which city was the center of the ancient Roman Empire?|Rome|Athens|Constantinople|Carthage
+Which explorer is credited with reaching India by sea around Africa in 1498?|Vasco da Gama|Christopher Columbus|Ferdinand Magellan|Marco Polo
+In which year did the Berlin Wall fall?|1989|1961|1991|1975
+#Movies and TV
+Who directed Jaws and E.T.?|Steven Spielberg|James Cameron|George Lucas|Martin Scorsese
+Which movie features the line I'll be back?|The Terminator|Die Hard|Predator|Robocop
+What is the name of the toy cowboy in Toy Story?|Woody|Buzz|Rex|Slinky
+In The Lion King, what is the name of Simba's father?|Mufasa|Scar|Nala|Rafiki
+Who played Captain Jack Sparrow in Pirates of the Caribbean?|Johnny Depp|Orlando Bloom|Brad Pitt|Tom Cruise
+What is the name of the school Harry Potter attends?|Hogwarts|Beauxbatons|Durmstrang|Ilvermorny
+Which green ogre stars in a famous animated film series?|Shrek|Fiona|Donkey|Gru
+In Finding Nemo, what kind of fish is Nemo?|Clownfish|Goldfish|Angelfish|Pufferfish
+What is the name of the fictional African nation in Black Panther?|Wakanda|Zamunda|Genovia|Latveria
+Who played Iron Man in the Marvel movies?|Robert Downey Jr.|Chris Evans|Chris Hemsworth|Mark Ruffalo
+What is the name of Thor's hammer?|Mjolnir|Gungnir|Stormbreaker|Excalibur
+Which TV show features dragons and the Iron Throne?|Game of Thrones|The Witcher|Vikings|Merlin
+Which TV show is set in the fictional town of Hawkins, Indiana?|Stranger Things|The Goldbergs|Riverdale|Twin Peaks
+Which animated family lives at 742 Evergreen Terrace?|The Simpsons|The Griffins|The Flintstones|The Jetsons
+What is the name of the coffee shop in Friends?|Central Perk|The Coffee Bean|Java Joes|Monks Cafe
+Who is the main character in Breaking Bad?|Walter White|Jesse Pinkman|Saul Goodman|Hank Schrader
+In Star Wars, who is Luke Skywalker's father?|Darth Vader|Obi-Wan Kenobi|Yoda|Han Solo
+What color pill does Neo take in The Matrix to see the truth?|Red|Blue|Green|Yellow
+Which movie features the quote May the Force be with you?|Star Wars|Star Trek|Dune|Alien
+Which forgetful fish is Marlin's friend in Finding Nemo?|Dory|Bruce|Crush|Gill
+In Frozen, what is the name of Elsa's sister?|Anna|Rapunzel|Ariel|Belle
+Who played Forrest Gump?|Tom Hanks|Tom Cruise|Kevin Costner|Bill Murray
+What kind of animal is Baloo in The Jungle Book?|A bear|A tiger|A panther|A monkey
+What is the name of the snowman in Frozen?|Olaf|Frosty|Sven|Kristoff
+What is the name of the boss of the Minions in Despicable Me?|Gru|Vector|Scarlet Overkill|Dr. Nefario
+Which actor played the Joker in The Dark Knight?|Heath Ledger|Joaquin Phoenix|Jack Nicholson|Jared Leto
+Which movie is about a great white shark terrorizing a beach town?|Jaws|Deep Blue Sea|The Meg|Orca
+What is the name of Harry Potter's owl?|Hedwig|Errol|Pigwidgeon|Crookshanks
+Which Hogwarts house is Harry Potter sorted into?|Gryffindor|Slytherin|Ravenclaw|Hufflepuff
+What is the name of the princess in Sleeping Beauty?|Aurora|Cinderella|Snow White|Belle
+Which TV series features the character Michael Scott?|The Office|Parks and Recreation|Brooklyn Nine-Nine|Community
+Which sitcom features the character Sheldon Cooper?|The Big Bang Theory|Friends|How I Met Your Mother|Two and a Half Men
+What is the name of the robot love interest in WALL-E?|EVE|AVA|MO|BOB
+Who directed Titanic?|James Cameron|Steven Spielberg|Ridley Scott|Christopher Nolan
+What is the name of the city Batman protects?|Gotham City|Metropolis|Star City|Central City
+What is Spider-Man's real name?|Peter Parker|Bruce Wayne|Clark Kent|Tony Stark
+What is the name of Superman's home planet?|Krypton|Mars|Vulcan|Tatooine
+Which Disney movie features the song Let It Go?|Frozen|Tangled|Moana|Brave
+What is the name of the toy space ranger in Toy Story?|Buzz Lightyear|Woody|Rex|Zurg
+In The Wizard of Oz, what is the name of Dorothy's dog?|Toto|Fido|Rex|Benji
+What is the favorite food of the Teenage Mutant Ninja Turtles?|Pizza|Burgers|Tacos|Sushi
+Which Korean series features deadly children's games played for money?|Squid Game|Parasite|Kingdom|Train to Busan
+What is the Mandalorian's tiny green companion often called?|Grogu|Yoda|Chewbacca|Ewok
+In Lord of the Rings, which hobbit carries the One Ring to Mordor?|Frodo|Bilbo|Pippin|Merry
+Who is the main character of The Hunger Games?|Katniss Everdeen|Bella Swan|Tris Prior|Hermione Granger
+Which movie features a time-traveling DeLorean?|Back to the Future|Ghostbusters|Knight Rider|Cars
+How many Infinity Stones are there in the Marvel universe?|Six|Five|Seven|Four
+Which Disney heroine disguises herself as a man to join the army?|Mulan|Merida|Pocahontas|Jasmine
+What is the name of the lion cub who becomes king in The Lion King?|Simba|Kovu|Nala|Timon
+What is the name of the ogre's talking donkey friend in Shrek?|Donkey|Eeyore|Puss|Dragon
+In Moana, which demigod is voiced by Dwayne Johnson?|Maui|Tamatoa|Hades|Kristoff
+Which movie features a character named Maximus the gladiator?|Gladiator|Troy|Spartacus|300
+What is the name of the wizard in The Lord of the Rings with a grey robe?|Gandalf|Merlin|Dumbledore|Saruman
+#Music
+Which band sang Bohemian Rhapsody?|Queen|The Beatles|Led Zeppelin|Pink Floyd
+How many strings does a standard guitar have?|Six|Four|Five|Eight
+Who is known as the King of Pop?|Michael Jackson|Elvis Presley|Prince|Justin Timberlake
+Which band included John Lennon and Paul McCartney?|The Beatles|The Rolling Stones|The Who|The Kinks
+Who sang Rolling in the Deep?|Adele|Beyonce|Rihanna|Taylor Swift
+Which instrument has black and white keys?|Piano|Violin|Flute|Drums
+Which Taylor Swift album was released in 2014?|1989|Red|Fearless|Lover
+Which rapper is known by the stage name Slim Shady?|Eminem|Jay-Z|Drake|Kanye West
+Which singer is known as the Queen of Pop?|Madonna|Beyonce|Lady Gaga|Britney Spears
+Which country did the band ABBA come from?|Sweden|Norway|Denmark|Finland
+Which composer wrote the Fifth Symphony with the famous da-da-da-dum opening?|Beethoven|Mozart|Bach|Chopin
+Who sang Thriller?|Michael Jackson|Prince|Stevie Wonder|Lionel Richie
+What does a conductor use to lead an orchestra?|A baton|A bow|A mallet|A pick
+Which band performed Smells Like Teen Spirit?|Nirvana|Pearl Jam|Soundgarden|Green Day
+Which singer's real name is Stefani Germanotta?|Lady Gaga|Katy Perry|Pink|Lorde
+Who sang Shape of You?|Ed Sheeran|Justin Bieber|Sam Smith|Bruno Mars
+Which band sang Hotel California?|Eagles|Fleetwood Mac|Journey|Boston
+Who was the drummer of The Beatles?|Ringo Starr|Mick Fleetwood|Charlie Watts|Keith Moon
+Who is the lead singer of U2?|Bono|The Edge|Sting|Chris Martin
+Which musical features the song Memory?|Cats|Les Miserables|Wicked|Hamilton
+Which musical is about Alexander Hamilton?|Hamilton|Rent|Chicago|Evita
+Which Disney movie features the song Hakuna Matata?|The Lion King|Aladdin|Moana|Tarzan
+Which singer is known for the song Single Ladies?|Beyonce|Rihanna|Alicia Keys|Ciara
+Who is the lead singer of Coldplay?|Chris Martin|Thom Yorke|Brandon Flowers|Matt Bellamy
+Which genre is Bob Marley famous for?|Reggae|Salsa|Jazz|Country
+What is the musical term for playing softly?|Piano|Forte|Allegro|Crescendo
+What is the musical term for playing loudly?|Forte|Piano|Adagio|Legato
+How many keys are on a standard piano?|88|76|66|100
+Which instrument family does a trumpet belong to?|Brass|Woodwind|String|Percussion
+Which instrument family is a Stradivarius famous for?|Violin|Guitar|Piano|Flute
+Which K-pop group includes Jungkook and V?|BTS|Blackpink|EXO|Twice
+Who sang Old Town Road?|Lil Nas X|Post Malone|Drake|Travis Scott
+Which rock star is nicknamed The Boss?|Bruce Springsteen|Bon Jovi|Billy Joel|Bruce Willis
+Who sang Purple Rain?|Prince|Jimi Hendrix|David Bowie|Lenny Kravitz
+Which band's lead singer is Mick Jagger?|The Rolling Stones|The Who|Aerosmith|Led Zeppelin
+Which band made the album The Dark Side of the Moon?|Pink Floyd|Led Zeppelin|Genesis|Yes
+Which artist released the 2016 album Lemonade?|Beyonce|Rihanna|Solange|Adele
+Which holiday song is famously sung by Mariah Carey?|All I Want for Christmas Is You|Jingle Bell Rock|Silent Night|Last Christmas
+Which large keyboard instrument with pipes is often found in churches?|Organ|Harp|Accordion|Synthesizer
+Who composed The Four Seasons?|Vivaldi|Bach|Mozart|Handel
+Who composed The Magic Flute?|Mozart|Beethoven|Verdi|Wagner
+Which country is the birthplace of the tango?|Argentina|Spain|Cuba|Brazil
+Which singer was known as the King of Rock and Roll?|Elvis Presley|Chuck Berry|Little Richard|Buddy Holly
+Which instrument is played with a bow and has four strings and is larger than a violin?|Cello|Viola|Harp|Banjo
+How many members were in the original Beatles?|Four|Three|Five|Six
+Which Beatles song begins with the line Yesterday, all my troubles seemed so far away?|Yesterday|Hey Jude|Let It Be|Help
+Which pop star is nicknamed Queen Bey?|Beyonce|Rihanna|Nicki Minaj|Cardi B
+Which singer performed the theme song of the James Bond film Skyfall?|Adele|Sam Smith|Billie Eilish|Shirley Bassey
+#Sports
+How many players from one soccer team are on the field at a time?|Eleven|Nine|Ten|Twelve
+In which sport do you score a touchdown?|American football|Basketball|Baseball|Hockey
+How many points is a free throw worth in basketball?|One|Two|Three|Four
+Which country has won the most FIFA World Cups?|Brazil|Germany|Argentina|Italy
+Where were the 2016 Summer Olympics held?|Rio de Janeiro|London|Tokyo|Beijing
+Which sport uses a shuttlecock?|Badminton|Tennis|Squash|Table tennis
+How many rings are on the Olympic flag?|Five|Four|Six|Seven
+Which sport does Tiger Woods play?|Golf|Tennis|Baseball|Basketball
+In tennis, what is a score of zero called?|Love|Nil|Zero|Duck
+How many innings are in a standard baseball game?|Nine|Seven|Eight|Ten
+How long is a marathon?|26.2 miles|20 miles|30 miles|13.1 miles
+Which NBA legend is nicknamed Air Jordan?|Michael Jordan|LeBron James|Kobe Bryant|Magic Johnson
+In which sport would you perform a slam dunk?|Basketball|Volleyball|Handball|Netball
+Which country hosts the Wimbledon tennis tournament?|England|France|Australia|United States
+What is it called when a bowler knocks down all ten pins three times in a row?|A turkey|A hat trick|An eagle|A birdie
+What is it called when a player scores three goals in a game?|A hat trick|A turkey|A triple play|A grand slam
+How many players per team are on the court in basketball?|Five|Six|Seven|Four
+In golf, what is one stroke under par called?|Birdie|Eagle|Bogey|Albatross
+In golf, what is one stroke over par called?|Bogey|Birdie|Eagle|Par
+What shape is a rugby ball?|Oval|Round|Square|Flat
+Which swimmer has the most Olympic gold medals?|Michael Phelps|Ian Thorpe|Mark Spitz|Ryan Lochte
+Which sprinter holds the 100 meter world record of 9.58 seconds?|Usain Bolt|Carl Lewis|Justin Gatlin|Tyson Gay
+The Masters is a famous tournament in which sport?|Golf|Tennis|Snooker|Cricket
+In baseball, how many strikes make an out?|Three|Two|Four|Five
+How many bases are on a baseball field including home plate?|Four|Three|Five|Six
+How many holes are on a standard golf course?|18|9|12|24
+How many minutes is a regulation soccer match, not counting stoppage time?|90|80|100|120
+Which country invented the sport of judo?|Japan|China|Korea|Thailand
+In which sport is the Tour de France held?|Cycling|Running|Swimming|Skiing
+Which trophy is awarded to the NHL champion?|The Stanley Cup|The Lombardi Trophy|The Larry O'Brien Trophy|The Claret Jug
+Which sport features the Super Bowl?|American football|Baseball|Basketball|Hockey
+In which sport are the terms scrum and try used?|Rugby|Cricket|Baseball|Handball
+Which sport uses a puck?|Ice hockey|Field hockey|Lacrosse|Cricket
+How many players per team are on the court in volleyball?|Six|Five|Seven|Eight
+What is the maximum score in ten-pin bowling?|300|200|250|400
+Which country won the 2018 FIFA World Cup?|France|Croatia|Brazil|Germany
+Which country won the 2022 FIFA World Cup?|Argentina|France|Croatia|Morocco
+Which sport takes place in a ring with gloves and rounds?|Boxing|Wrestling|Fencing|Judo
+Which sport has players called pitchers and catchers?|Baseball|Cricket|Basketball|Football
+What is the highest possible score for a single dart throw of three darts?|180|150|200|120
+What color is the center of an archery target?|Gold|Red|Blue|White
+Which sport is played at Wimbledon on grass courts?|Tennis|Golf|Cricket|Rugby
+How many players are on an ice hockey team on the ice at once, including the goalie?|Six|Five|Seven|Eight
+In which sport do you try to get a hole in one?|Golf|Darts|Bowling|Archery
+Which martial art uses a bamboo sword called a shinai?|Kendo|Karate|Judo|Aikido
+#Food and Drink
+Which country is sushi from?|Japan|China|Korea|Thailand
+What is the main ingredient in guacamole?|Avocado|Tomato|Pepper|Cucumber
+Which fruit is dried to make raisins?|Grapes|Plums|Cherries|Apricots
+What is the main ingredient of hummus?|Chickpeas|Lentils|Black beans|Peas
+Which nut is used to make marzipan?|Almonds|Cashews|Peanuts|Walnuts
+Which country is famous for pizza?|Italy|France|Greece|Spain
+Miso is made from what?|Fermented soybeans|Rice vinegar|Seaweed|Fish
+Which part of a chili pepper is the hottest?|The inner white membrane|The skin|The stem|The leaf
+Which drink is made from fermented tea?|Kombucha|Kefir|Cider|Lemonade
+Which cheese is traditionally used in a Greek salad?|Feta|Cheddar|Brie|Gouda
+Which citrus fruit is used to make lemonade?|Lemons|Limes|Oranges|Grapefruits
+Which spice is the most expensive by weight?|Saffron|Cinnamon|Paprika|Pepper
+What is tofu made from?|Soybeans|Rice|Wheat|Corn
+Which vegetable is traditionally used to make sauerkraut?|Cabbage|Cucumber|Carrot|Beet
+Which fruit has its seeds on the outside?|Strawberry|Raspberry|Blueberry|Apple
+Which country do tacos come from?|Mexico|Spain|Peru|Argentina
+What is the main ingredient in bread?|Flour|Sugar|Rice|Corn starch
+Which vegetable are french fries made from?|Potato|Sweet corn|Carrot|Parsnip
+Which beans are used to make chocolate?|Cacao beans|Coffee beans|Soybeans|Vanilla beans
+Which fast food chain has golden arches?|McDonald's|Burger King|Wendy's|KFC
+Which fast food chain's mascot is a colonel?|KFC|Popeyes|Arby's|Subway
+Which leafy green is traditionally used in a Caesar salad?|Romaine lettuce|Spinach|Kale|Arugula
+Which Japanese noodle is thick and made from wheat flour?|Udon|Soba|Ramen|Somen
+In which country does the noodle soup pho come from?|Vietnam|Thailand|China|Japan
+What is the French word for a thin pancake?|Crepe|Souffle|Eclair|Brioche
+Which vegetable is the main ingredient of coleslaw?|Cabbage|Lettuce|Spinach|Celery
+Which is the largest fruit that grows on a tree?|Jackfruit|Watermelon|Durian|Coconut
+What is the sweet, sticky food made by bees?|Honey|Syrup|Molasses|Jam
+Which dairy product is made by churning cream?|Butter|Yogurt|Cheese|Whey
+Which grain is the main ingredient in traditional Spanish paella?|Rice|Pasta|Couscous|Barley
+Which country is famous for maple syrup?|Canada|Sweden|Norway|Australia
+Which cold Spanish soup is made from tomatoes?|Gazpacho|Paella|Tortilla|Ceviche
+Which Italian dessert is made with ladyfingers and mascarpone?|Tiramisu|Cannoli|Panna cotta|Gelato
+Which spread is made from ground peanuts?|Peanut butter|Nutella|Tahini|Jam
+What is the green paste often served with sushi?|Wasabi|Pesto|Guacamole|Matcha
+Which fruit is dried to make prunes?|Plums|Grapes|Figs|Dates
+Which country is famous for fondue?|Switzerland|Austria|Belgium|Norway
+Which cereal grain is used to make popcorn?|Corn|Wheat|Rice|Barley
+Which drink is made by steeping dried leaves in hot water?|Tea|Coffee|Cocoa|Juice
+What is the main ingredient in pesto?|Basil|Parsley|Mint|Spinach
+Which fruit is the main ingredient of applesauce?|Apples|Pears|Peaches|Plums
+Which country does the dish paella come from?|Spain|Italy|Mexico|Portugal
+What is the main ingredient in a traditional Japanese tempura?|Battered fried seafood or vegetables|Raw fish|Boiled rice|Grilled tofu
+What is the filling of a classic Greek spanakopita?|Spinach and feta|Lamb and rice|Potatoes|Chicken
+Which vegetable do pickles come from?|Cucumbers|Zucchini|Carrots|Peppers
+What fruit is a clementine a type of?|Mandarin orange|Lemon|Grapefruit|Lime
+What is the main flavor of licorice?|Anise|Mint|Cinnamon|Vanilla
+Which drink is made from roasted and ground beans and is popular in the morning?|Coffee|Tea|Cocoa|Juice
+#Animals
+What is the largest animal on Earth?|The blue whale|The African elephant|The giraffe|The whale shark
+What is the fastest land animal?|The cheetah|The lion|The pronghorn|The greyhound
+How many legs does a spider have?|Eight|Six|Ten|Twelve
+What is a baby kangaroo called?|Joey|Cub|Pup|Kit
+What is a group of lions called?|A pride|A pack|A herd|A flock
+What is a group of crows called?|A murder|A gaggle|A pride|A swarm
+Which is the largest bird?|The ostrich|The emu|The penguin|The kiwi
+Which is the only mammal capable of true flight?|The bat|The flying squirrel|The sugar glider|The colugo
+What do pandas mainly eat?|Bamboo|Fish|Berries|Grass
+Which animal is known as the ship of the desert?|The camel|The horse|The donkey|The llama
+How many hearts does an octopus have?|Three|One|Two|Eight
+What is the tallest animal?|The giraffe|The elephant|The ostrich|The moose
+Which animal has black and white stripes?|Zebra|Lion|Tiger|Panda
+What do you call a baby dog?|Puppy|Kit|Cub|Calf
+Which sea creature has eight arms and no bones?|Octopus|Starfish|Crab|Dolphin
+What do you call a baby cat?|Kitten|Cub|Pup|Calf
+Which lizard is famous for changing color?|Chameleon|Iguana|Gecko|Komodo dragon
+Which of these mammals lays eggs?|The platypus|The beaver|The otter|The mole
+Which bird is a symbol of peace?|The dove|The eagle|The owl|The swan
+What is the national bird of the United States?|The bald eagle|The turkey|The hawk|The falcon
+What is a baby swan called?|Cygnet|Cub|Chick|Kit
+What is the largest big cat?|The tiger|The lion|The leopard|The jaguar
+Which animal usually sleeps hanging upside down in caves?|The bat|The owl|The koala|The panda
+What kind of animal is a Komodo dragon?|Lizard|Snake|Crocodile|Turtle
+What is the largest species of penguin?|The emperor penguin|The king penguin|The Adelie penguin|The little penguin
+Which insect lives in a hive and makes honey?|Bee|Wasp|Ant|Beetle
+Which animal is known for its trunk?|Elephant|Rhino|Hippo|Giraffe
+Which reptile has a hard shell?|Turtle|Lizard|Snake|Crocodile
+Which animal carries its baby in a pouch?|Kangaroo|Horse|Bear|Wolf
+What is a group of fish called?|A school|A pride|A pack|A herd
+Which bird can mimic human speech?|Parrot|Eagle|Owl|Sparrow
+Which animal eats mostly eucalyptus leaves?|Koala|Panda|Sloth|Kangaroo
+How many toes does a typical cat have on each front paw?|Five|Four|Three|Six
+What is a baby goat called?|Kid|Calf|Lamb|Foal
+What is a baby horse called?|Foal|Calf|Kid|Pup
+What is a baby sheep called?|Lamb|Kid|Calf|Cub
+Which bird can turn its head almost all the way around?|Owl|Eagle|Penguin|Parrot
+Which animal is famous for building dams?|Beaver|Otter|Badger|Squirrel
+What do caterpillars turn into?|Butterflies or moths|Beetles|Bees|Spiders
+Which bird can fly backwards?|Hummingbird|Swallow|Kingfisher|Sparrow
+How many arms does a typical starfish have?|Five|Four|Six|Eight
+Which whale is called the unicorn of the sea?|Narwhal|Beluga|Orca|Humpback
+What is the largest rodent?|Capybara|Beaver|Porcupine|Guinea pig
+Which animal is the largest living land carnivore?|The polar bear|The lion|The tiger|The wolf
+What is a baby frog called?|Tadpole|Cub|Larva fish|Calf
+What do you call animals that are active at night?|Nocturnal|Diurnal|Crepuscular|Migratory
+What is the only continent where penguins live in the wild naturally in large colonies on ice?|Antarctica|Africa|Australia|Europe
+Which animal has the longest neck?|The giraffe|The ostrich|The swan|The llama
+Which sea animal can regrow lost arms?|Starfish|Dolphin|Seal|Shark
+Which big cat is known for its roar and its mane?|Lion|Tiger|Leopard|Cheetah
+Which animal is known for slow movement and lives in trees in Central and South America?|Sloth|Koala|Monkey|Lemur
+Which animal produces silk?|Silkworm|Spider only|Bee|Ant
+#Tech and Gaming
+Which company makes the iPhone?|Apple|Samsung|Google|Microsoft
+What does WWW stand for?|World Wide Web|World Wide Wire|Web World Wide|Wide Web World
+What is the name of the princess Mario usually rescues?|Princess Peach|Princess Zelda|Princess Daisy|Princess Rosalina
+Which game features Steve and Creepers?|Minecraft|Roblox|Fortnite|Terraria
+Which company created the PlayStation?|Sony|Nintendo|Microsoft|Sega
+Which video game is the best-selling of all time?|Minecraft|Tetris|Grand Theft Auto V|Wii Sports
+In Pac-Man, what are the main things you eat?|Dots|Coins|Stars|Mushrooms
+Who is Mario's brother?|Luigi|Wario|Yoshi|Toad
+In The Legend of Zelda, what is the name of the hero?|Link|Zelda|Ganon|Navi
+What does GPS stand for?|Global Positioning System|Global Phone Service|General Positioning Signal|Ground Position Satellite
+What does USB stand for?|Universal Serial Bus|Ultra Speed Backup|United System Board|Universal Signal Base
+What does CPU stand for?|Central Processing Unit|Computer Power Unit|Central Program Utility|Core Processing Utility
+What does AI stand for?|Artificial Intelligence|Automated Internet|Advanced Interface|Applied Integration
+Who founded Microsoft with Paul Allen?|Bill Gates|Steve Jobs|Mark Zuckerberg|Elon Musk
+Who co-founded Apple with Steve Wozniak?|Steve Jobs|Bill Gates|Tim Cook|Larry Page
+Which company owns YouTube?|Google|Meta|Microsoft|Amazon
+Which company owns Instagram?|Meta|Google|Snap|Twitter
+What does HTML stand for?|HyperText Markup Language|HighText Machine Language|Hyper Transfer Markup Language|Home Tool Markup Language
+In Among Us, what are the traitors called?|Impostors|Spies|Killers|Saboteurs
+In Pokemon, what type is Pikachu?|Electric|Fire|Water|Grass
+Which Pokemon is number one in the Pokedex?|Bulbasaur|Pikachu|Charmander|Squirtle
+Which Nintendo console came out in 2006 with a motion-sensing controller?|Wii|Switch|GameCube|DS
+Which game popularized battle royale with 100 players and building?|Fortnite|Halo|Overwatch|Doom
+What is the name of Sonic's two-tailed fox sidekick?|Tails|Knuckles|Shadow|Amy
+What kind of animal is Sonic?|Hedgehog|Fox|Rabbit|Echidna
+Which block game involves falling shapes called tetrominoes?|Tetris|Bejeweled|Candy Crush|Puyo Puyo
+In what year was the first iPhone released?|2007|2005|2010|2003
+Which programming language is named after a snake?|Python|Cobra|Viper|Ruby
+Which language is mainly used to style web pages?|CSS|Python|SQL|C++
+How many bits are in a byte?|Eight|Four|Sixteen|Two
+What do you call unwanted junk email?|Spam|Cache|Bytes|Pings
+Which company makes the Xbox?|Microsoft|Sony|Nintendo|Sega
+Which app is known for short videos and viral dances?|TikTok|Pinterest|LinkedIn|Reddit
+What is the name of Amazon's voice assistant?|Alexa|Siri|Cortana|Bixby
+What is the name of Apple's voice assistant?|Siri|Alexa|Cortana|Bixby
+What does Wi-Fi let you do?|Connect to a network wirelessly|Charge batteries|Cool a computer|Print photos
+In which year was Minecraft fully released?|2011|2009|2014|2016
+What does RAM stand for?|Random Access Memory|Read And Move|Rapid Access Module|Remote Application Memory
+Which two-paddle ball game was one of the first video game hits?|Pong|Pac-Man|Space Invaders|Asteroids
+Which power-up makes Mario grow bigger?|Super Mushroom|Fire Flower|Star|Cape Feather
+Which company created Super Mario?|Nintendo|Sega|Atari|Capcom
+What does PDF stand for?|Portable Document Format|Printed Digital File|Personal Data Folder|Public Document Form
+What does the Ctrl plus C shortcut usually do?|Copy|Cut|Paste|Close
+What does the Ctrl plus V shortcut usually do?|Paste|Copy|Undo|Save
+Which company makes the Pixel phone?|Google|Apple|Samsung|Sony
+Which game has the characters Link and Zelda but is not about Zelda herself as the hero?|The Legend of Zelda|Super Mario Bros|Kirby|Metroid
+What shape is the Nintendo Switch Joy-Con?|Small controller that slides onto the console|A steering wheel|A guitar|A pair of sticks only
+What is the name of the Apple watch product line?|Apple Watch|iWatch Pro|Apple Band|Time Pod
+Which social network uses a blue bird logo historically?|Twitter|Facebook|Snapchat|Reddit
+Which game has a character called Master Chief?|Halo|Doom|Gears of War|Call of Duty
+Which Minecraft mob explodes near the player?|Creeper|Zombie|Skeleton|Enderman
+#Casino and Cards
+How many cards are in a standard deck without jokers?|52|48|54|56
+How many suits are in a standard deck of cards?|Four|Three|Five|Six
+What is the highest hand in standard poker?|A royal flush|Four of a kind|A straight flush|A full house
+In blackjack, what is the goal?|Get closer to 21 than the dealer without going over|Collect the most cards|Match the dealer's cards|Get exactly 10
+What is an Ace plus a ten-value card called in blackjack?|A blackjack|A bust|A push|A split
+In blackjack, what does bust mean?|Going over 21|Winning with 21|Tying the dealer|Doubling down
+In blackjack, what does push mean?|A tie with the dealer|Winning double|Losing the hand|Splitting cards
+In blackjack, what is a King worth?|10|13|11|1
+What can an Ace be worth in blackjack?|1 or 11|Only 1|Only 11|10
+What does double down mean in blackjack?|Double your bet and take one more card|Split your hand|Fold your hand|Take insurance
+When is insurance offered in blackjack?|When the dealer shows an Ace|When you have 21|When you bust|When you split
+What does a 3 to 2 blackjack payout mean?|Win $3 for every $2 bet|Win $2 for every $3 bet|Win double|Win back your bet
+What is another word for a casino dealer at a roulette table?|Croupier|Banker|Sommelier|Bellhop
+How many numbers are on a European roulette wheel including zero?|37|36|38|40
+What color is the zero pocket on a roulette wheel?|Green|Red|Black|White
+What do the numbers on opposite faces of a standard die add up to?|Seven|Six|Eight|Nine
+What is the roll called when both dice show one?|Snake eyes|Boxcars|Hard eight|Yo
+What is the highest card in a standard poker hand ranking?|Ace|King|Queen|Joker
+How many private cards does each player get in Texas Hold'em?|Two|Three|Five|Seven
+What is a flush in poker?|Five cards of the same suit|Five cards in order|Three of a kind and a pair|Two pairs
+What is a straight in poker?|Five cards in sequence|Five cards of one suit|Four of a kind|A pair of aces
+What do you call betting all of your chips in poker?|Going all in|Checking|Folding|Calling
+In which US state is Las Vegas?|Nevada|Arizona|California|Utah
+Monte Carlo is a famous casino district in which country?|Monaco|France|Italy|Spain
+In the card game Go Fish, what do you ask for?|Cards of a certain rank|Dice|Chips|Coins
+In which card game do you say Uno when you have one card left?|Uno|Skip-Bo|Crazy Eights|Phase 10
+What is it called when you split a pair into two hands in blackjack?|A split|A bust|A hit|A stand
+In blackjack, what does hit mean?|Take another card|Stop taking cards|Double your bet|Surrender
+In blackjack, what does stand mean?|Keep your current hand|Take another card|Split your pair|Double down
+What is the best possible starting hand in blackjack?|An Ace and a ten-value card|Two eights|Two nines|A pair of kings
+What is the total of an Ace and a King in blackjack?|21|11|20|22
+Students from which university were featured in the movie 21?|MIT|Harvard|Yale|Stanford
+Which casino game is played with a spinning wheel and a ball?|Roulette|Craps|Baccarat|Keno
+Which casino game uses two dice and a pass line?|Craps|Roulette|Poker|Slots
+Which US city is nicknamed Sin City?|Las Vegas|Reno|Atlantic City|Miami
+Which of these is NOT a suit in a standard deck?|Stars|Hearts|Spades|Clubs
+What color are the suits hearts and diamonds?|Red|Black|Blue|Green
+What color are the suits spades and clubs?|Black|Red|Blue|Green
+What do you call the cards dealt face up in the middle of the table in Hold'em?|The community cards|The burn cards|The pocket cards|The kitty
+Which card game is also called twenty-one?|Blackjack|Poker|Baccarat|Rummy
+What do you call the small bet put in before cards are dealt in poker?|The ante|The jackpot|The tip|The raise
+#General Knowledge
+How many days are in a leap year?|366|365|364|367
+How many continents are there?|Seven|Five|Six|Eight
+What is the currency of Japan?|Yen|Won|Yuan|Peso
+What is the currency of the United Kingdom?|Pound sterling|Euro|Dollar|Franc
+What is the currency of Mexico?|Peso|Dollar|Real|Euro
+What is the currency of India?|Rupee|Yen|Dollar|Dinar
+What is the currency of Brazil?|Real|Peso|Dollar|Euro
+Which language has the most native speakers in the world?|Mandarin Chinese|English|Spanish|Hindi
+How many sides does a hexagon have?|Six|Five|Seven|Eight
+How many sides does an octagon have?|Eight|Six|Nine|Ten
+What shape is a stop sign?|Octagon|Hexagon|Pentagon|Circle
+What is the square root of 144?|12|14|16|10
+What is 15 multiplied by 4?|60|45|50|75
+What is the next prime number after 7?|11|9|10|13
+What is the Roman numeral for 50?|L|C|X|D
+What is the Roman numeral for 100?|C|L|M|D
+How many degrees are in a right angle?|90|45|180|60
+Who painted the Mona Lisa?|Leonardo da Vinci|Michelangelo|Raphael|Vincent van Gogh
+Who painted The Starry Night?|Vincent van Gogh|Claude Monet|Pablo Picasso|Salvador Dali
+Who wrote Romeo and Juliet?|William Shakespeare|Charles Dickens|Jane Austen|Mark Twain
+Who wrote the Harry Potter books?|J. K. Rowling|Suzanne Collins|Stephenie Meyer|Roald Dahl
+Who wrote The Cat in the Hat?|Dr. Seuss|Roald Dahl|Shel Silverstein|Eric Carle
+Who wrote Charlie and the Chocolate Factory?|Roald Dahl|Dr. Seuss|C. S. Lewis|J. R. R. Tolkien
+What is the name of the boy who never grows up?|Peter Pan|Pinocchio|Tom Sawyer|Huckleberry Finn
+Which fairy tale character lost a glass slipper?|Cinderella|Snow White|Rapunzel|Belle
+Which month has the fewest days?|February|April|June|September
+Which day of the week is named after the god Thor?|Thursday|Tuesday|Wednesday|Friday
+Which month is named after Julius Caesar?|July|August|June|May
+Which Italian city is famous for its canals?|Venice|Florence|Milan|Rome
+Which famous tower is in Paris?|The Eiffel Tower|Big Ben|The Leaning Tower|The CN Tower
+In which Italian city is the Leaning Tower?|Pisa|Rome|Florence|Venice
+Which famous clock tower is in London?|Big Ben|Tower Bridge|The Shard|The Gherkin
+In which city is the Statue of Liberty?|New York City|Washington D.C.|Boston|Philadelphia
+In which city is Hollywood?|Los Angeles|San Francisco|San Diego|Las Vegas
+Which famous red bridge is in San Francisco?|The Golden Gate Bridge|The Brooklyn Bridge|The Sunshine Skyway|Tower Bridge
+What is the Japanese art of paper folding called?|Origami|Ikebana|Kintsugi|Sumi-e
+What does Bonjour mean?|Hello|Goodbye|Thank you|Please
+What does Gracias mean?|Thank you|Please|Hello|Goodbye
+What is the Spanish word for friend?|Amigo|Casa|Gato|Perro
+What is the German word for thank you?|Danke|Bitte|Gut|Ja
+What does Ciao mean in Italian?|Hello and goodbye|Thank you|Please|Sorry
+What does LOL stand for?|Laugh out loud|Lots of love|Live on line|Look over there
+What do you get by mixing blue and yellow?|Green|Purple|Orange|Brown
+What do you get by mixing red and blue?|Purple|Green|Orange|Brown
+What do you get by mixing red and yellow?|Orange|Green|Purple|Brown
+How many hours are in a day?|24|12|36|48
+How many weeks are in a year?|52|48|50|54
+How many months have 31 days?|Seven|Six|Five|Eight
+Which holiday is celebrated on December 25th?|Christmas|Easter|Halloween|Thanksgiving
+Which holiday is celebrated on October 31st?|Halloween|Christmas|Easter|Labor Day
+Which holiday is celebrated on July 4th in the United States?|Independence Day|Memorial Day|Labor Day|Veterans Day
+Which holiday involves hunting for hidden eggs?|Easter|Halloween|Thanksgiving|Valentine's Day
+Which holiday is celebrated on February 14th?|Valentine's Day|Christmas|Easter|New Year's Day
+What are the three primary colors of light?|Red, green and blue|Red, yellow and blue|Cyan, magenta and yellow|Black, white and gray
+Which board game involves buying properties and passing Go?|Monopoly|Clue|Risk|Scrabble
+Which board game has a king, queen, rooks, knights and bishops?|Chess|Checkers|Backgammon|Go
+How many squares are on a chessboard?|64|32|72|81
+Which board game involves finding who committed a murder in a mansion?|Clue|Monopoly|Risk|Battleship
+Which board game is about building words with letter tiles?|Scrabble|Boggle|Taboo|Pictionary
+How many sides does a standard die have?|Six|Four|Eight|Twelve
+</script>
 <script>
 /* ============ CORE LOGIC (no DOM) — amounts are integer cents ============ */
 var Core = (function () {
@@ -354,7 +1002,7 @@ var Core = (function () {
   var readOnly = false;      // viewer mode: never saves, never notifies
   var listeners = [];
 
-  function fresh() { return { players: [], nextId: 1, history: [], nextHid: 1, settings: { locked: false, maxBuyin: 0, bankFee: 10, bankLimit: 3 } }; }
+  function fresh() { return { players: [], nextId: 1, history: [], nextHid: 1, round: { n: 1, phase: 'betting' }, dealer: '', dealerReq: '', settings: { locked: false, maxBuyin: 0, bankFee: 10, bankLimit: 3, triviaPct: 10, rounds: false } }; }
 
   function parseMoney(str) {
     if (typeof str !== 'string') return null;
@@ -401,7 +1049,7 @@ var Core = (function () {
   function addPlayer(name, startStr) {
     var chk = checkPlayer(name, startStr);
     if (!chk.ok) return chk;
-    var p = { id: state.nextId++, name: chk.name, start: chk.cents, balance: chk.cents, added: 0, takes: 0 };
+    var p = { id: state.nextId++, name: chk.name, start: chk.cents, balance: chk.cents, added: 0, takes: 0, bet: 0, hand: 0, doubled: false, out: false, trivia: 0, triviaAt: -1, vin: 0, vout: 0 };
     state.players.push(p);
     save();
     return { ok: true, player: p };
@@ -415,7 +1063,8 @@ var Core = (function () {
   }
 
   function resetAll() {
-    state.players.forEach(function (p) { p.balance = p.start; p.added = 0; p.takes = 0; });
+    state.players.forEach(function (p) { p.balance = p.start; p.added = 0; p.takes = 0; p.bet = 0; p.hand = 0; p.doubled = false; p.out = false; p.trivia = 0; p.triviaAt = -1; p.vin = 0; p.vout = 0; });
+    state.round = { n: 1, phase: 'betting' };
     state.history = [];
     save();
   }
@@ -477,6 +1126,34 @@ var Core = (function () {
     save();
     return { ok: true, delta: got, fee: fee, balance: p.balance };
   }
+  // Trivia: a right answer pays a slice of the allowance (host % of the buy-in), one question per match.
+  function matchKey() { return state.settings.rounds ? state.round.n : state.nextHid; }
+  function triviaInfo(p) {
+    var pct = state.settings.triviaPct, allowance = Math.floor(p.start * pct / 100);
+    var remaining = allowance - (p.trivia || 0);
+    var reward = remaining < 1 ? 0 : Math.min(remaining, Math.max(1, Math.floor(allowance / 5)));
+    var asked = p.triviaAt === matchKey();
+    return { pct: pct, allowance: allowance, remaining: Math.max(0, remaining), reward: reward, asked: asked, can: pct > 0 && !asked && reward > 0 };
+  }
+  function trivia(id) {
+    var p = findPlayer(id);
+    if (!p) return { ok: false, error: 'Player not found.' };
+    var i = triviaInfo(p);
+    if (!i.pct) return { ok: false, error: 'The host turned trivia off.' };
+    if (i.asked) return { ok: false, error: 'You already answered a trivia question this ' + (state.settings.rounds ? 'round' : 'hand') + '.' };
+    if (!i.reward) return { ok: false, error: 'You have used all your trivia winnings (' + fmt(i.allowance) + ' max).' };
+    p.balance += i.reward; p.trivia = (p.trivia || 0) + i.reward;
+    state.history.push({ id: state.nextHid++, pid: p.id, name: p.name, outcome: 'trivia', wager: 0, delta: i.reward });
+    p.triviaAt = matchKey();                 // after logging, so quick mode's per-hand key stays put until the next hand
+    if (state.history.length > HISTORY_MAX) state.history.shift();
+    save();
+    return { ok: true, delta: i.reward, balance: p.balance };
+  }
+  function setTriviaPct(n) {
+    if (!Number.isInteger(n) || n < 0 || n > 20) return { ok: false, error: 'Trivia bonus must be a whole number from 0 to 20 (percent of the starting chips).' };
+    state.settings.triviaPct = n; save();
+    return { ok: true };
+  }
   function setBankLimit(n) {
     if (!Number.isInteger(n) || n < 0 || n > 20) return { ok: false, error: 'Bank limit must be a whole number from 0 to 20.' };
     state.settings.bankLimit = n; save();
@@ -493,7 +1170,7 @@ var Core = (function () {
     var h = state.history.pop();
     if (!h) return { ok: false, error: 'No hands to undo.' };
     var p = findPlayer(h.pid);
-    if (p) { p.balance -= h.delta; if (h.outcome === 'rebuy') { p.added = Math.max(0, (p.added || 0) - h.delta - h.wager); p.takes = Math.max(0, (p.takes || 0) - 1); } }
+    if (p) { p.balance -= h.delta; if (h.outcome === 'rebuy') { p.added = Math.max(0, (p.added || 0) - h.delta - h.wager); p.takes = Math.max(0, (p.takes || 0) - 1); } if (h.outcome === 'trivia') { p.trivia = Math.max(0, (p.trivia || 0) - h.delta); p.triviaAt = -1; } }
     save();
     return { ok: true, entry: h, playerFound: !!p };
   }
@@ -513,13 +1190,20 @@ var Core = (function () {
              Number.isInteger(p.start) && Number.isInteger(p.balance);
     }).map(function (p) {
       var q = { id: p.id, name: p.name, start: p.start, balance: p.balance, added: Number.isInteger(p.added) && p.added > 0 ? p.added : 0, takes: Number.isInteger(p.takes) && p.takes > 0 ? p.takes : 0 };
+      var ni = function (v) { return Number.isInteger(v) && v > 0 ? v : 0; };
+      q.bet = ni(p.bet); q.hand = ni(p.hand); q.doubled = p.doubled === true; q.out = p.out === true;
+      q.trivia = ni(p.trivia); q.triviaAt = Number.isInteger(p.triviaAt) ? p.triviaAt : -1; q.vin = ni(p.vin); q.vout = ni(p.vout);
       if (typeof p.owner === 'string' && p.owner) q.owner = p.owner;     // which device sits at this seat (online only)
       return q;
     });
     var st = s.settings && typeof s.settings === 'object' ? s.settings : {};
     out.settings = { locked: st.locked === true, maxBuyin: Number.isInteger(st.maxBuyin) && st.maxBuyin > 0 ? st.maxBuyin : 0,
       bankFee: Number.isInteger(st.bankFee) && st.bankFee >= 0 && st.bankFee <= 50 ? st.bankFee : 10,
-      bankLimit: Number.isInteger(st.bankLimit) && st.bankLimit >= 0 && st.bankLimit <= 20 ? st.bankLimit : 3 };
+      bankLimit: Number.isInteger(st.bankLimit) && st.bankLimit >= 0 && st.bankLimit <= 20 ? st.bankLimit : 3,
+      triviaPct: Number.isInteger(st.triviaPct) && st.triviaPct >= 0 && st.triviaPct <= 20 ? st.triviaPct : 10, rounds: st.rounds === true };
+    var rd = s.round && typeof s.round === 'object' ? s.round : {};
+    out.round = { n: Number.isInteger(rd.n) && rd.n > 0 ? rd.n : 1, phase: rd.phase === 'playing' ? 'playing' : 'betting' };
+    out.dealer = typeof s.dealer === 'string' ? s.dealer : ''; out.dealerReq = typeof s.dealerReq === 'string' ? s.dealerReq : '';
     var hist = Array.isArray(s.history) ? s.history : [];
     out.history = hist.filter(function (h) {
       return h && typeof h.id === 'number' && typeof h.pid === 'number' && typeof h.name === 'string' &&
@@ -548,8 +1232,9 @@ var Core = (function () {
   function adopt(s) {
     var n = normalize(s);
     if (!n) return false;
-    n.players.forEach(function (p) { delete p.owner; });
-    n.settings = { locked: false, maxBuyin: 0, bankFee: n.settings.bankFee, bankLimit: n.settings.bankLimit };
+    n.players.forEach(function (p) { delete p.owner; p.bet = 0; p.hand = 0; p.doubled = false; p.out = false; });
+    n.round = { n: 1, phase: 'betting' }; n.dealer = ''; n.dealerReq = '';
+    n.settings = { locked: false, maxBuyin: 0, bankFee: n.settings.bankFee, bankLimit: n.settings.bankLimit, triviaPct: n.settings.triviaPct, rounds: false };
     readOnly = false;
     state = n;
     save();
@@ -565,7 +1250,7 @@ var Core = (function () {
 
   return {
     parseMoney: parseMoney, fmt: fmt, addPlayer: addPlayer, removePlayer: removePlayer,
-    resetAll: resetAll, settle: settle, insurance: insurance, rebuy: rebuy, setBankFee: setBankFee, setBankLimit: setBankLimit, undo: undo, load: load,
+    resetAll: resetAll, settle: settle, insurance: insurance, rebuy: rebuy, trivia: trivia, triviaInfo: triviaInfo, setTriviaPct: setTriviaPct, setBankFee: setBankFee, setBankLimit: setBankLimit, undo: undo, load: load,
     checkPlayer: checkPlayer, checkWager: checkWager, checkAmount: checkAmount,
     setReadOnly: setReadOnly, setSnapshot: setSnapshot, adopt: adopt, onChange: onChange,
     get state() { return state; }
@@ -618,7 +1303,7 @@ var Core = (function () {
   var chipsText = {}, chipsOpen = {};
   var results = {};  // seat id -> {text, cls}
   var busy = false;  // ignore taps while a request is in flight (no double settles)
-  var LABEL = { win: 'Win', blackjack: 'Blackjack', push: 'Push', loss: 'Loss', rebuy: 'Added chips', insurance_win: 'Insurance won', insurance_loss: 'Insurance lost' };
+  var LABEL = { win: 'Win', blackjack: 'Blackjack', push: 'Push', loss: 'Loss', rebuy: 'Added chips', insurance_win: 'Insurance won', insurance_loss: 'Insurance lost', trivia: 'Trivia win', vault_in: 'From vault', vault_out: 'To vault' };
 
   /* online session: role 'host' (the dealer) or 'viewer' (a player at someone else's table) */
   var ONLINE_KEY = 'bjOnline.v1';
@@ -638,6 +1323,17 @@ var Core = (function () {
     if (!isPlayer()) return true;
     return !paused() && !!myRef && p.owner === myRef;
   }
+
+  /* ---------- rounds, dealer, trivia, vault helpers ---------- */
+  var vaultBal = null, triviaDeck = [], triviaBank = null;
+  function roundsOn() { return !!online.role && !!Core.state.settings.rounds; }
+  function iDeal() { return online.role === 'host' ? !Core.state.dealer : (!!myRef && Core.state.dealer === myRef); }
+  function seatOf(ref) { var ps = Core.state.players; for (var i = 0; i < ps.length; i++) if (ps[i].owner === ref) return ps[i]; return null; }
+  function dealerName() { var s = Core.state.dealer ? seatOf(Core.state.dealer) : null; return s ? s.name : 'Host'; }
+  function isDealerSeat(p) { return !!Core.state.dealer && p.owner === Core.state.dealer; }
+  function matchKey() { return Core.state.settings.rounds ? Core.state.round.n : Core.state.nextHid; }
+  function triviaUsedKey(p) { return 'bjTriv.' + (online.code || 'local') + '.' + p.id; }
+  function triviaUsed(p) { return lsGet(triviaUsedKey(p)) === String(matchKey()); }
 
   function setAddMsg(text, ok) { addMsg.textContent = text; addMsg.className = 'msg' + (ok ? ' ok' : ''); }
   function setToolMsg(text) { toolMsg.textContent = text; }
@@ -897,7 +1593,8 @@ var Core = (function () {
     else if (o === 'win' || o === 'insurance_win') sfx(quiet ? 'ding' : (isBigWin(e) ? 'big' : 'win'));
     else if (!quiet && (o === 'loss' || o === 'insurance_loss')) sfx('loss');
     else if (!quiet && o === 'push') sfx('push');
-    else if (o === 'rebuy') sfx('coin');
+    else if (o === 'rebuy' || o === 'vault_in' || o === 'vault_out') sfx('coin');
+    else if (o === 'trivia') sfx(quiet ? 'ding' : 'win');
     if (!quiet && (o === 'win' || o === 'blackjack') && streakOf(e) >= 3) sfx('streak');
   }
   function applySndBtn() { $('sndBtn').textContent = 'Sound: ' + (sndOn() ? 'On' : 'Off'); }
@@ -975,6 +1672,8 @@ var Core = (function () {
       if (!quiet) { flash('loss'); shake(); ring(pt.x, pt.y, '#e5484d'); }
     } else if (o === 'rebuy') {
       rain(quiet ? 10 : 24);
+    } else if (o === 'trivia') {
+      burst(pt.x, pt.y, 'gold', quiet ? 20 : 60); if (!quiet) toast('🧠 ' + e.name + ' won ' + Core.fmt(e.delta) + ' at trivia!');
     }
     var st = streakOf(e);
     if (st >= 3 && (o === 'win' || o === 'blackjack')) {
@@ -1109,6 +1808,8 @@ var Core = (function () {
     $('undoBtn').textContent = pr ? 'Undo my last hand' : 'Undo Last Hand';
     toolMsg.hidden = $('toolbar').hidden;
     $('hostTools').hidden = online.role !== 'host';
+    $('roundsBtn').textContent = 'Rounds: ' + (Core.state.settings.rounds ? 'On' : 'Off');
+    $('roundsBtn').hidden = !online.role;
     $('lockBtn').textContent = locked ? 'Resume players' : 'Pause players';
     $('lockBanner').hidden = !(pr && locked);
     if (pr && !$('addPanel').hidden && !nameEl.value) nameEl.value = lsGet(NAME_KEY) || '';   // pre-fill only while the form is showing
@@ -1116,6 +1817,9 @@ var Core = (function () {
     var ae = typeof document.activeElement !== 'undefined' ? document.activeElement : null;
     var focusId = ae && ae.id && /^[wc]\d+$/.test(ae.id) ? ae.id : null;
     renderStandings();
+    renderRound();
+    renderVault();
+    refreshVault(false);
     renderPlayers();
     renderHistory();
     fxSafe(announceNew);
@@ -1130,7 +1834,7 @@ var Core = (function () {
     if (ps.length < 2) return;
     ps.sort(function (a, b) { return b.balance - a.balance; });
     ps.forEach(function (p, i) {
-      var net = p.balance - p.start - (p.added || 0);     // chips added later are not counted as winnings
+      var net = p.balance + (p.vout || 0) - p.start - (p.added || 0) - (p.vin || 0);     // chips added later are not counted as winnings
       var row = el('div', 'hist-row');
       var who = el('div', 'who');
       var nm = el('div', null, (i + 1) + '. ' + p.name);
@@ -1189,6 +1893,49 @@ var Core = (function () {
       card.appendChild(el('div', 'balance' + (p.balance === 0 ? ' zero' : ''), Core.fmt(p.balance)));
       card.appendChild(chipStack(p));
 
+      var rmode = roundsOn();
+      var inplay = rmode && p.hand > 0;
+      if (ctl && rmode && isDealerSeat(p)) {
+        nm.appendChild(el('span', 'badge', 'DEALER'));
+        card.appendChild(el('div', 'locked', 'You are dealing this round, so you do not bet.'));
+      } else if (ctl && rmode && inplay) {
+        card.appendChild(el('div', 'inplay', 'In play: ' + Core.fmt(p.hand) + (p.doubled ? ' (doubled)' : '')));
+        var drow = el('div', 'row');
+        var dbl = el('button', 'btn-ghost', 'Double down'); dbl.type = 'button'; dbl.setAttribute('data-action', 'dbl');
+        drow.appendChild(dbl); card.appendChild(drow);
+      } else if (ctl && rmode) {
+        var wrap0 = el('div', 'wager');
+        var lab0 = el('label', null, p.out ? 'Sitting out' : (p.bet > 0 ? 'Wager locked in' : 'Wager for this round')); lab0.setAttribute('for', 'w' + p.id);
+        wrap0.appendChild(lab0);
+        if (!p.out) {
+          var inp0 = el('input'); inp0.type = 'text'; inp0.id = 'w' + p.id;
+          inp0.setAttribute('inputmode', 'decimal'); inp0.setAttribute('autocomplete', 'off');
+          inp0.placeholder = 'Wager $'; inp0.setAttribute('data-wager', p.id);
+          inp0.value = wagers[p.id] || (p.bet > 0 ? String(p.bet / 100) : '');
+          var r0 = el('div', 'row');
+          var c0 = el('div', 'f3'); c0.appendChild(inp0);
+          var h0 = el('div', 'f1'); var hb0 = el('button', 'btn-ghost', '½'); hb0.type = 'button'; hb0.setAttribute('data-action', 'half'); h0.appendChild(hb0);
+          var d0 = el('div', 'f1'); var db0 = el('button', 'btn-ghost', '×2'); db0.type = 'button'; db0.setAttribute('data-action', 'double'); d0.appendChild(db0);
+          r0.appendChild(c0); r0.appendChild(h0); r0.appendChild(d0); wrap0.appendChild(r0);
+          var lk = el('button', 'btn-add', p.bet > 0 ? 'Change wager (' + Core.fmt(p.bet) + ' locked)' : 'Lock in wager'); lk.type = 'button'; lk.setAttribute('data-action', 'bet');
+          wrap0.appendChild(lk);
+        }
+        var so = el('button', 'btn-ghost mt', p.out ? 'Sit back in' : 'Sit out'); so.type = 'button';
+        so.setAttribute('data-action', 'sitout'); so.setAttribute('data-out', p.out ? '0' : '1');
+        wrap0.appendChild(so);
+        card.appendChild(wrap0);
+      }
+      if (ctl && rmode && online.role === 'host' && p.owner && !isDealerSeat(p) && Core.state.round.phase === 'betting') {
+        var md = el('button', 'btn-ghost mt', 'Make ' + p.name + ' the dealer'); md.type = 'button';
+        md.setAttribute('data-action', 'makedealer'); md.setAttribute('data-ref', p.owner); card.appendChild(md);
+      }
+      if (ctl && Core.state.settings.triviaPct > 0 && !(rmode && inplay)) {
+        var ti = Core.triviaInfo(p);
+        if (ti.can && !triviaUsed(p)) {
+          var tb = el('button', 'btn-ghost mt', '🧠 Trivia: win ' + Core.fmt(ti.reward)); tb.type = 'button'; tb.setAttribute('data-action', 'trivia');
+          card.appendChild(tb);
+        } else if (ti.asked || triviaUsed(p)) card.appendChild(el('div', 'sub', 'Trivia used for this ' + (Core.state.settings.rounds ? 'round' : 'hand') + '.'));
+      }
       if (ctl) {
         var wrap = el('div', 'wager');
         var lab = el('label', null, 'Wager'); lab.setAttribute('for', 'w' + p.id);
@@ -1207,7 +1954,7 @@ var Core = (function () {
         dcol.appendChild(db);
         wrow.appendChild(wcol); wrow.appendChild(hcol); wrow.appendChild(dcol);
         wrap.appendChild(wrow);
-        card.appendChild(wrap);
+        if (!rmode) card.appendChild(wrap);
 
         var grid = el('div', 'outcomes');
         [['win', 'Win 1:1', 'o-win'], ['blackjack', 'Blackjack 3:2', 'o-bj'],
@@ -1216,7 +1963,7 @@ var Core = (function () {
           b.setAttribute('data-action', 'settle'); b.setAttribute('data-outcome', o[0]);
           grid.appendChild(b);
         });
-        card.appendChild(grid);
+        if (!rmode || inplay) card.appendChild(grid);
 
         var r = results[p.id];
         card.appendChild(el('div', 'result' + (r ? ' ' + r.cls : ''), r ? r.text : ''));
@@ -1224,7 +1971,7 @@ var Core = (function () {
         var det = el('details', 'chips');
         det.open = !!chipsOpen[p.id];
         det.addEventListener('toggle', function () { chipsOpen[p.id] = det.open; });
-        det.appendChild(el('summary', null, 'More: add chips, insurance'));
+        det.appendChild(el('summary', null, rmode ? 'More: bank, insurance' : 'More: add chips, insurance'));
         det.appendChild(el('div', 'sub', 'Take chips from the bank (' + Core.state.settings.bankFee + '% fee' + (Core.state.settings.bankLimit ? ', ' + Math.max(0, Core.state.settings.bankLimit - (p.takes || 0)) + ' of ' + Core.state.settings.bankLimit + ' trips left' : '') + ')'));
         var crow = el('div', 'row mt');
         var cin = el('input'); cin.type = 'text'; cin.id = 'c' + p.id; cin.placeholder = 'Chips $';
@@ -1232,14 +1979,14 @@ var Core = (function () {
         cin.value = chipsText[p.id] || '';
         var cb = el('button', 'btn-ghost', 'Take'); cb.type = 'button'; cb.setAttribute('data-action', 'rebuy');
         crow.appendChild(cin); crow.appendChild(cb); det.appendChild(crow);
-        det.appendChild(el('div', 'sub', 'Insurance (half the wager above, pays 2:1)'));
+        if (!rmode || inplay) det.appendChild(el('div', 'sub', rmode ? 'Insurance (half your hand, pays 2:1)' : 'Insurance (half the wager above, pays 2:1)'));
         var ins = el('div', 'outcomes two');
         [['win', 'Insurance won'], ['loss', 'Insurance lost']].forEach(function (o) {
           var b = el('button', 'btn-ghost', o[1]); b.type = 'button';
           b.setAttribute('data-action', 'insure'); b.setAttribute('data-result', o[0]);
           ins.appendChild(b);
         });
-        det.appendChild(ins);
+        if (!rmode || inplay) det.appendChild(ins);
         card.appendChild(det);
       }
       listEl.appendChild(card);
@@ -1256,6 +2003,9 @@ var Core = (function () {
       var who = el('div', 'who');
       who.appendChild(el('div', null, e.name));
       who.appendChild(el('div', 'what', e.outcome === 'rebuy' ? (e.wager > 0 ? 'Bank: took ' + Core.fmt(e.delta + e.wager) + ' · fee ' + Core.fmt(e.wager) : 'Added chips')
+        : e.outcome === 'trivia' ? '🧠 Trivia win'
+        : e.outcome === 'vault_in' ? 'Took ' + Core.fmt(e.delta) + ' from the vault'
+        : e.outcome === 'vault_out' ? 'Saved ' + Core.fmt(-e.delta) + ' to the vault'
         : e.outcome.indexOf('insurance') === 0 ? (LABEL[e.outcome] || e.outcome) + ' · side bet ' + Core.fmt(e.wager)
         : (LABEL[e.outcome] || e.outcome) + ' · bet ' + Core.fmt(e.wager)));
       row.appendChild(who);
@@ -1271,7 +2021,9 @@ var Core = (function () {
       case 'add': return Core.addPlayer(a.name, a.startText);
       case 'settle': return Core.settle(a.pid, a.wagerText, a.outcome);
       case 'rebuy': return Core.rebuy(a.pid, a.amountText);
+      case 'trivia': return Core.trivia(a.pid);
       case 'settings':
+        if (a.settings && a.settings.triviaPct !== undefined) return Core.setTriviaPct(a.settings.triviaPct);
         if (a.settings && a.settings.bankFee !== undefined) return Core.setBankFee(a.settings.bankFee);
         if (a.settings && a.settings.bankLimit !== undefined) return Core.setBankLimit(a.settings.bankLimit);
         return { ok: true };
@@ -1289,19 +2041,31 @@ var Core = (function () {
       case 'add':
         c = Core.checkPlayer(a.name, a.startText); if (!c.ok) return c;
         body = isPlayer() ? { type: 'seat', name: c.name, buyin: c.cents } : { type: 'add', name: c.name, start: c.cents };
+        if (isPlayer() && $('fromVault') && $('fromVault').checked) body.fromVault = true;
         break;
       case 'settle':
-        c = Core.checkWager(a.wagerText); if (!c.ok) return c;
+        c = roundsOn() ? { ok: true, cents: 0 } : Core.checkWager(a.wagerText); if (!c.ok) return c;   // in rounds the hand in play is the wager
         body = { type: 'settle', pid: a.pid, wager: c.cents, outcome: a.outcome };
         break;
       case 'insure':
-        c = Core.checkWager(a.wagerText); if (!c.ok) return c;
+        c = roundsOn() ? { ok: true, cents: 0 } : Core.checkWager(a.wagerText); if (!c.ok) return c;
         body = { type: 'insurance', pid: a.pid, wager: c.cents, result: a.result };
         break;
       case 'rebuy':
         c = Core.checkAmount(a.amountText); if (!c.ok) return c;
         body = { type: 'rebuy', pid: a.pid, amount: c.cents };
         break;
+      case 'trivia': body = { type: 'trivia', pid: a.pid }; break;
+      case 'bet':
+        c = Core.checkWager(a.wagerText); if (!c.ok) return c;
+        body = { type: 'bet', pid: a.pid, amount: c.cents }; break;
+      case 'start': body = { type: 'start' }; break;
+      case 'dbl': body = { type: 'double', pid: a.pid }; break;
+      case 'sitout': body = { type: 'sitout', pid: a.pid, out: !!a.out }; break;
+      case 'dealer': body = { type: 'dealer_' + a.op }; if (a.ref !== undefined) body.ref = a.ref; break;
+      case 'vault':
+        c = Core.checkAmount(a.amountText); if (!c.ok) return c;
+        body = { type: a.op === 'in' ? 'vault_deposit' : 'vault_withdraw', pid: a.pid, amount: c.cents }; break;
       case 'remove': body = { type: 'remove', pid: a.pid }; break;
       case 'undo': body = { type: 'undo' }; break;
       case 'reset': body = { type: 'reset' }; break;
@@ -1318,11 +2082,191 @@ var Core = (function () {
       try { d = await r.json(); } catch (e) {}
       if (!r.ok || !d.ok) return { ok: false, error: d.error || 'Something went wrong. Try again.' };
       if (d.v > lastV && Core.setSnapshot(d.state)) lastV = d.v;
+      if (typeof d.vaultBalance === 'number') vaultBal = d.vaultBalance;
       return d;
     } catch (e) {
       return { ok: false, error: 'No connection. Nothing was changed. Try again.' };
     }
   }
+
+  function wagerInput(card) { var i = card.querySelector('input[data-wager]'); return i ? i.value : ''; }
+  function sfxSafe(n) { try { sfx(n); } catch (e) {} }
+
+  /* ---------- round bar: Start button + dealer hand-over ---------- */
+  function renderRound() {
+    var box = $('roundPanel');
+    var on = roundsOn() && Core.state.players.length > 0;
+    box.hidden = !on;
+    if (!on) return;
+    var t = Core.state, pr = isPlayer(), me = mySeat();
+    box.innerHTML = '';
+    var bar = el('div', 'rbar'); var left = el('div');
+    left.appendChild(el('div', 'big', 'Round ' + t.round.n + (t.round.phase === 'playing' ? ' · in play' : ' · place your wagers')));
+    left.appendChild(el('div', 'sub2', 'Dealer: ' + dealerName()));
+    bar.appendChild(left);
+    var ready = t.players.filter(function (p) { return !p.out && p.balance > 0 && !isDealerSeat(p); });
+    var waiting = ready.filter(function (p) { return !(p.bet > 0); });
+    var inHand = t.players.filter(function (p) { return p.hand > 0; });
+    if (iDeal() && t.round.phase === 'betting') {
+      var sb = el('button', 'btn-start', 'Start round'); sb.type = 'button'; sb.setAttribute('data-r', 'start');
+      if (!ready.length || waiting.length) sb.disabled = true;
+      bar.appendChild(sb);
+    }
+    box.appendChild(bar);
+    var msg = '';
+    if (t.round.phase === 'betting') msg = !ready.length ? 'Nobody can play yet.' : waiting.length ? 'Waiting for wagers: ' + waiting.map(function (p) { return p.name; }).join(', ') : 'All wagers are in. The dealer can start.';
+    else msg = inHand.length + ' hand' + (inHand.length === 1 ? '' : 's') + ' still to settle: ' + inHand.map(function (p) { return p.name; }).join(', ') + '. Once yours is settled, you can wager for the next round.';
+    box.appendChild(el('div', 'sub', msg));
+    // dealer hand-over
+    var drow = el('div', 'row mt');
+    if (t.dealerReq) {
+      var rs = seatOf(t.dealerReq);
+      box.appendChild(el('div', 'locked', (rs ? rs.name : 'A player') + ' asked to deal.'));
+      if (iDeal()) {
+        [['accept', 'Accept', 'btn-add'], ['reject', 'Reject', 'btn-ghost']].forEach(function (o) {
+          var b = el('button', o[2], o[1]); b.type = 'button'; b.setAttribute('data-r', 'dealer'); b.setAttribute('data-op', o[0]); drow.appendChild(b);
+        });
+      } else if (pr && myRef === t.dealerReq) {
+        var cb = el('button', 'btn-ghost', 'Cancel request'); cb.type = 'button'; cb.setAttribute('data-r', 'dealer'); cb.setAttribute('data-op', 'cancel'); drow.appendChild(cb);
+      }
+    } else if (pr && me && !iDeal() && t.round.phase === 'betting') {
+      var rb = el('button', 'btn-ghost', 'Request dealer'); rb.type = 'button'; rb.setAttribute('data-r', 'dealer'); rb.setAttribute('data-op', 'request'); drow.appendChild(rb);
+    }
+    if (online.role === 'host' && t.dealer && t.round.phase === 'betting') {
+      var tk = el('button', 'btn-ghost', 'Take the deck back'); tk.type = 'button'; tk.setAttribute('data-r', 'dealer'); tk.setAttribute('data-op', 'set'); tk.setAttribute('data-ref', ''); drow.appendChild(tk);
+    }
+    if (drow.childNodes.length) box.appendChild(drow);
+    var rm = el('div', 'msg'); rm.id = 'roundMsg'; rm.setAttribute('role', 'status'); box.appendChild(rm);
+  }
+  $('roundPanel').addEventListener('click', async function (e) {
+    var btn = e.target.closest ? e.target.closest('button[data-r]') : null;
+    if (!btn || busy) return;
+    e.preventDefault(); busy = true;
+    try {
+      var r = btn.getAttribute('data-r'), res;
+      if (r === 'start') { res = await perform({ type: 'start' }); if (res.ok) { sfxSafe('ding'); toast('Round ' + res.n + ' started. Good luck!'); } }
+      else res = await perform({ type: 'dealer', op: btn.getAttribute('data-op'), ref: btn.getAttribute('data-ref') === null ? undefined : btn.getAttribute('data-ref') });
+      render();
+      if (!res.ok && $('roundMsg')) $('roundMsg').textContent = res.error;
+    } finally { busy = false; }
+  });
+
+  /* ---------- trivia ---------- */
+  function loadTrivia() {
+    if (triviaBank) return triviaBank;
+    triviaBank = [];
+    var node = document.getElementById('triviaData'), cat = '';
+    var lines = ((node && node.textContent) || '').split('\n');
+    for (var i = 0; i < lines.length; i++) {
+      var ln = lines[i].trim(); if (!ln) continue;
+      if (ln.charAt(0) === '#') { cat = ln.slice(1).trim(); continue; }
+      var f = ln.split('|'); if (f.length < 3) continue;
+      triviaBank.push({ c: cat, q: f[0], a: f.slice(1) });
+    }
+    return triviaBank;
+  }
+  function nextQuestion() {
+    var bank = loadTrivia();
+    if (!triviaDeck.length) { for (var i = 0; i < bank.length; i++) triviaDeck.push(i); for (var j = triviaDeck.length - 1; j > 0; j--) { var k = Math.floor(Math.random() * (j + 1)), t = triviaDeck[j]; triviaDeck[j] = triviaDeck[k]; triviaDeck[k] = t; } }
+    return bank[triviaDeck.pop()];
+  }
+  var tvTimer = null, tvOpen = false;
+  function closeTrivia() { if (tvTimer) clearInterval(tvTimer); tvTimer = null; tvOpen = false; $('triviaModal').className = ''; render(); }
+  function openTrivia(p) {
+    var info = Core.triviaInfo(p);
+    if (!info.can || triviaUsed(p)) { toast('No trivia left for this ' + (Core.state.settings.rounds ? 'round' : 'hand') + '.'); return; }
+    var q = nextQuestion(); if (!q) return;
+    lsSet(triviaUsedKey(p), String(matchKey()));            // one question per match, win or lose
+    var opts = q.a.map(function (t, i) { return { t: t, ok: i === 0 }; });
+    for (var j = opts.length - 1; j > 0; j--) { var k = Math.floor(Math.random() * (j + 1)), x = opts[j]; opts[j] = opts[k]; opts[k] = x; }
+    $('triviaCat').textContent = q.c + ' · win ' + Core.fmt(info.reward);
+    $('triviaQ').textContent = q.q; $('triviaMsg').textContent = ''; $('triviaMsg').className = 'msg';
+    var box = $('triviaOpts'); box.innerHTML = ''; var done = false, left = 20;
+    function finish(choice, btnEl) {
+      if (done) return; done = true; if (tvTimer) clearInterval(tvTimer); tvTimer = null;
+      var kids = box.childNodes;
+      for (var n = 0; n < kids.length; n++) { kids[n].disabled = true; if (opts[n].ok) kids[n].className += ' good'; }
+      if (choice && choice.ok) {
+        perform({ type: 'trivia', pid: p.id }).then(function (res) {
+          $('triviaMsg').textContent = res.ok ? 'Correct! +' + Core.fmt(res.delta) : res.error;
+          $('triviaMsg').className = 'msg' + (res.ok ? ' ok' : '');
+          if (res.ok) { sfxSafe('win'); try { renderLocal(); } catch (e) { render(); } }
+        });
+      } else {
+        if (btnEl) btnEl.className += ' bad';
+        $('triviaMsg').textContent = choice ? 'Not quite. Better luck next round.' : 'Time is up. Better luck next round.';
+      }
+    }
+    opts.forEach(function (o) {
+      var b = el('button', 'btn-ghost topt', o.t); b.type = 'button';
+      b.addEventListener('click', function () { finish(o, b); });
+      box.appendChild(b);
+    });
+    var bar = $('triviaBar').firstChild; if (bar && bar.style) bar.style.width = '100%';
+    tvOpen = true; $('triviaModal').className = 'on';
+    tvTimer = setInterval(function () {
+      left -= 0.25; if (bar && bar.style) bar.style.width = Math.max(0, left / 20 * 100) + '%';
+      if (left <= 0) finish(null, null);
+    }, 250);
+  }
+  $('triviaClose').addEventListener('click', function (e) { e.preventDefault(); closeTrivia(); });
+
+  /* ---------- vault ---------- */
+  var vaultFetched = 0;
+  function refreshVault(force) {
+    if (!isPlayer() || !ONLINE_URL) return;
+    var now = Date.now(); if (!force && now - vaultFetched < 15000) return; vaultFetched = now;
+    api('/api/vault').then(function (r) { return r.json(); }).then(function (d) {
+      if (d && typeof d.balance === 'number') { vaultBal = d.balance; renderVault(); }
+    }).catch(function () {});
+  }
+  function renderVault() {
+    var pr = isPlayer(), me = pr ? mySeat() : null;
+    $('vaultPanel').hidden = !(pr && vaultBal !== null);
+    $('vaultInfo').textContent = 'In your vault: ' + Core.fmt(vaultBal || 0) + '. Saved chips stay yours for next game, with no fee. Withdrawing is free and does not count as a bank trip.';
+    $('vaultSave').hidden = !me; $('vaultTake').hidden = !me;
+    var fv = $('fromVaultRow'), show = pr && !me && (vaultBal || 0) > 0;
+    if (fv.style) fv.style.display = show ? 'block' : 'none'; fv.hidden = !show;
+    $('fromVaultTxt').textContent = 'Use saved chips from my vault (' + Core.fmt(vaultBal || 0) + ') as my buy-in';
+  }
+  function vaultGo(op) {
+    return async function (e) {
+      e.preventDefault(); var me = mySeat(); if (busy || !me) return; busy = true;
+      try {
+        var res = await perform({ type: 'vault', op: op, pid: me.id, amountText: $('vaultAmt').value });
+        $('vaultMsg').textContent = res.ok ? (op === 'in' ? 'Saved to your vault.' : 'Withdrawn to the table.') : res.error;
+        $('vaultMsg').className = 'msg' + (res.ok ? ' ok' : '');
+        if (res.ok) { $('vaultAmt').value = ''; sfxSafe('coin'); renderVault(); render(); }
+      } finally { busy = false; }
+    };
+  }
+  $('vaultSave').addEventListener('click', vaultGo('in'));
+  $('vaultTake').addEventListener('click', vaultGo('out'));
+
+  /* ---------- host settings: trivia % and rounds ---------- */
+  $('triviaPctBtn').addEventListener('click', async function (e) {
+    e.preventDefault(); if (busy || isPlayer()) return;
+    var txt = $('triviaPct').value.trim();
+    if (!/^\d{1,2}$/.test(txt) || parseInt(txt, 10) > 20) { $('feeMsg').textContent = 'Enter a whole number from 0 to 20 (0 = trivia off).'; $('feeMsg').className = 'msg'; return; }
+    busy = true;
+    try {
+      var n = parseInt(txt, 10), res = await perform({ type: 'settings', settings: { triviaPct: n } });
+      $('feeMsg').textContent = res.ok ? (n ? 'Trivia can earn each player up to ' + n + '% of their buy-in.' : 'Trivia is off.') : res.error;
+      $('feeMsg').className = 'msg' + (res.ok ? ' ok' : '');
+      if (res.ok) { $('triviaPct').value = ''; render(); }
+    } finally { busy = false; }
+  });
+  $('roundsBtn').addEventListener('click', async function (e) {
+    e.preventDefault(); if (busy || isPlayer()) return;
+    busy = true;
+    try {
+      if (!online.role) { $('feeMsg').textContent = 'Rounds are for online tables. Offline, enter a wager per hand.'; $('feeMsg').className = 'msg'; return; }
+      var res = await perform({ type: 'settings', settings: { rounds: !Core.state.settings.rounds } });
+      $('feeMsg').textContent = res.ok ? (Core.state.settings.rounds ? 'Rounds on: wagers, then the dealer starts.' : 'Quick mode: wagers are entered per hand.') : res.error;
+      $('feeMsg').className = 'msg' + (res.ok ? ' ok' : '');
+      if (res.ok) render();
+    } finally { busy = false; }
+  });
 
   function perform(a) { return online.role ? sendOnline(a) : Promise.resolve(localPerform(a)); }
 
@@ -1412,9 +2356,35 @@ var Core = (function () {
         return;
       }
 
+      if (action === 'bet' || action === 'dbl' || action === 'sitout' || action === 'makedealer') {
+        var rq;
+        if (action === 'bet') {
+          var bt = card.querySelector('input[data-wager]').value; wagers[id] = bt;
+          rq = await perform({ type: 'bet', pid: id, wagerText: bt });
+          if (rq.ok) { delete wagers[id]; results[id] = { text: 'Wager locked in.', cls: 'pos' }; }
+        } else if (action === 'dbl') {
+          rq = await perform({ type: 'dbl', pid: id });
+          if (rq.ok) { sfxSafe('coin'); results[id] = { text: 'Doubled down: ' + Core.fmt(rq.hand) + ' in play.', cls: 'neu' }; }
+        } else if (action === 'sitout') {
+          rq = await perform({ type: 'sitout', pid: id, out: btn.getAttribute('data-out') === '1' });
+        } else {
+          rq = await perform({ type: 'dealer', op: 'set', ref: btn.getAttribute('data-ref') });
+        }
+        if (!rq.ok) results[id] = { text: rq.error, cls: 'err' };
+        render();
+        return;
+      }
+
+      if (action === 'trivia') {
+        var tp = null;
+        Core.state.players.forEach(function (x) { if (x.id === id) tp = x; });
+        if (tp) openTrivia(tp);
+        return;
+      }
+
       if (action === 'settle') {
         var outcome = btn.getAttribute('data-outcome');
-        var wagerText = card.querySelector('input[data-wager]').value;
+        var wagerText = wagerInput(card);
         wagers[id] = wagerText;
         var res = await perform({ type: 'settle', pid: id, wagerText: wagerText, outcome: outcome });
         setToolMsg('');
@@ -1453,7 +2423,7 @@ var Core = (function () {
 
       if (action === 'insure') {
         var iresult = btn.getAttribute('data-result');
-        var itext = card.querySelector('input[data-wager]').value;
+        var itext = wagerInput(card);
         wagers[id] = itext;
         var ir = await perform({ type: 'insure', pid: id, wagerText: itext, result: iresult });
         if (!ir.ok) results[id] = { text: ir.error, cls: 'err' };

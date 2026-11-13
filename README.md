@@ -41,3 +41,11 @@ When the online service is configured, the app is invite-only:
 Set or change the admin key with `npx wrangler secret put ADMIN_KEY` (or the Cloudflare dashboard). The key is never stored in git.
 `index.html` points at `https://blackjack-table.camc-cf76.workers.dev` via `ONLINE_URL`; set it to `''` for a fully offline copy.
 Tables expire after 24 hours idle. Hosting uses a secret token that only the host's phone has.
+
+
+## Rounds, dealer, trivia and the vault (online tables)
+
+- **Rounds**: everyone locks in a wager (the dealer does not bet). The dealer's **Start round** button only works once every player who is not sitting out has a wager in. During a hand you can **Double down**. As soon as a player's hand is settled (Win / Blackjack / Push / Loss) they can lock in a wager for the next round, and when every hand is settled the next round opens. The host can switch to quick mode (wager entered per hand) with the **Rounds** button.
+- **Choosing the dealer**: a seated player taps **Request dealer** (between rounds); the current dealer taps **Accept** or **Reject**. The host can also assign the dealer or take the deck back. The dealer sits out of betting.
+- **Trivia**: 594 questions in 12 categories, one question per round (20 seconds, a wrong answer or time-out uses up the question). A right answer pays a fifth of the allowance, and total trivia winnings are capped at the host's **trivia %** of the player's buy-in (0 to 20, default 10, 0 = off). It counts toward net profit. The answer check runs on the player's phone, so it is an honour system with a hard cap.
+- **Vault**: players can save chips from the table into a personal vault that is tied to their approved device and survives between games. Saving and withdrawing are free and are not bank trips. A new seat can be bought with vault chips. Net profit = balance + saved - start - bank chips - withdrawn.

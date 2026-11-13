@@ -56,12 +56,22 @@ function fmt(cents) {
   return (neg ? '-' : '') + '$' + d + (rem ? '.' + (rem < 10 ? '0' : '') + rem : '');
 }
 
+const nn = n => Number.isInteger(n) && n > 0 ? n : 0;
+const newPlayer = (id, name, start, owner) => {
+  const p = { id, name, start, balance: start, added: 0, takes: 0, bet: 0, hand: 0, doubled: false, out: false, trivia: 0, triviaAt: -1, vin: 0, vout: 0 };
+  if (owner) p.owner = owner;
+  return p;
+};
+
 export function normalizeTable(t) {
   t = t && typeof t === 'object' ? t : {};
   const players = (Array.isArray(t.players) ? t.players : []).map(p => {
     const q = { id: p.id, name: String(p.name), start: p.start, balance: p.balance,
-      added: Number.isInteger(p.added) && p.added > 0 ? p.added : 0,     // chips taken from the bank after the buy-in (so net profit is honest)
-      takes: Number.isInteger(p.takes) && p.takes > 0 ? p.takes : 0 };   // how many times they went to the bank
+      added: nn(p.added),                                    // chips taken from the bank after the buy-in (so net profit is honest)
+      takes: nn(p.takes),                                    // how many times they went to the bank
+      bet: nn(p.bet), hand: nn(p.hand), doubled: p.doubled === true, out: p.out === true,   // round play: next wager, wager in play, sitting out
+      trivia: nn(p.trivia), triviaAt: Number.isInteger(p.triviaAt) ? p.triviaAt : -1,        // trivia winnings so far, and the match they last answered in
+      vin: nn(p.vin), vout: nn(p.vout) };                    // chips moved in from / out to the savings vault
     if (typeof p.owner === 'string' && p.owner) q.owner = p.owner;
     return q;
   });
@@ -70,32 +80,48 @@ export function normalizeTable(t) {
   const maxId = players.reduce((m, p) => Math.max(m, p.id), 0);
   const maxHid = history.reduce((m, h) => Math.max(m, h.id), 0);
   const st = t.settings && typeof t.settings === 'object' ? t.settings : {};
+  const rd = t.round && typeof t.round === 'object' ? t.round : {};
   return {
     players, history,
     nextId: Math.max(typeof t.nextId === 'number' ? t.nextId : 1, maxId + 1),
     nextHid: Math.max(typeof t.nextHid === 'number' ? t.nextHid : 1, maxHid + 1),
+    round: { n: Number.isInteger(rd.n) && rd.n > 0 ? rd.n : 1, phase: rd.phase === 'playing' ? 'playing' : 'betting' },
+    dealer: typeof t.dealer === 'string' && REF_RE.test(t.dealer) ? t.dealer : '',          // '' = the host deals
+    dealerReq: typeof t.dealerReq === 'string' && REF_RE.test(t.dealerReq) ? t.dealerReq : '',
     settings: { locked: st.locked === true, maxBuyin: isCents(st.maxBuyin) ? st.maxBuyin : 0,
-      bankFee: Number.isInteger(st.bankFee) && st.bankFee >= 0 && st.bankFee <= 50 ? st.bankFee : 10,
-      bankLimit: Number.isInteger(st.bankLimit) && st.bankLimit >= 0 && st.bankLimit <= 20 ? st.bankLimit : 3 },   // max bank trips per player (0 = no limit)   // % kept by the bank when chips are added
+      bankFee: Number.isInteger(st.bankFee) && st.bankFee >= 0 && st.bankFee <= 50 ? st.bankFee : 10,        // % kept by the bank when chips are taken
+      bankLimit: Number.isInteger(st.bankLimit) && st.bankLimit >= 0 && st.bankLimit <= 20 ? st.bankLimit : 3,   // max bank trips per player (0 = no limit)
+      triviaPct: Number.isInteger(st.triviaPct) && st.triviaPct >= 0 && st.triviaPct <= 20 ? st.triviaPct : 10, // trivia can pay up to this % of each player's buy-in
+      rounds: st.rounds === false ? false : true },          // rounds: wagers -> dealer Start -> hands -> next round
   };
 }
 
 function cleanName(n) { return String(n || '').replace(/[\u0000-\u001f<>]/g, '').trim().slice(0, 30); }
 
-export function applyAction(t, actor, a) {
+export function applyAction(t, actor, a, ctx) {
+  ctx = ctx || {};
   const host = actor.role === 'host';
   const deny = error => ({ ok: false, error });
+  const dealerRef = !!actor.ref && !!t.dealer && actor.ref === t.dealer;
+  const dealerPower = host || dealerRef;                // the host can always act as dealer; so can the player they handed the deck to
   const mine = p => !!actor.ref && p.owner === actor.ref;
   const find = id => t.players.find(p => p.id === id);
-  const may = p => host || mine(p);                 // players may only touch their own seat
+  const may = p => dealerPower || mine(p);              // players may only touch their own seat
+  const dealerSeat = p => !!t.dealer && p.owner === t.dealer;
+  const rounds = t.settings.rounds;
   const NOT_YOURS = 'You can only change your own chips.';
   if (!a || typeof a !== 'object') return deny('Unknown action.');
-  if (!host && t.settings.locked) return deny('The host has paused the table.');
+  if (!dealerPower && t.settings.locked) return deny('The host has paused the table.');
   const logHand = (p, outcome, wager, delta) => {
     t.history.push({ id: t.nextHid++, pid: p.id, name: p.name, outcome, wager, delta });
     if (t.history.length > HISTORY_MAX) t.history.shift();
   };
   const overMax = c => t.settings.maxBuyin && c > t.settings.maxBuyin ? 'The host set a max of ' + fmt(t.settings.maxBuyin) + ' per buy-in.' : null;
+  const matchKey = () => rounds ? t.round.n : t.nextHid;       // trivia: one question per round (or per hand in quick mode)
+  const roundOver = () => {
+    if (rounds && t.round.phase === 'playing' && !t.players.some(p => p.hand > 0)) { t.round.phase = 'betting'; t.round.n += 1; }
+  };
+  const handsInPlay = () => t.players.some(p => p.hand > 0);
 
   switch (a.type) {
     case 'add': {                                    // host adds anyone
@@ -103,7 +129,7 @@ export function applyAction(t, actor, a) {
       const name = cleanName(a.name);
       if (!name) return deny('Enter a player name.');
       if (!isCents(a.start)) return deny('Starting balance must be more than $0.');
-      t.players.push({ id: t.nextId++, name, start: a.start, balance: a.start, added: 0, takes: 0 });
+      t.players.push(newPlayer(t.nextId++, name, a.start));
       return { ok: true };
     }
     case 'seat': {                                   // a player takes their own seat
@@ -115,40 +141,101 @@ export function applyAction(t, actor, a) {
       if (!isCents(a.buyin)) return deny('Starting balance must be more than $0.');
       const m = overMax(a.buyin); if (m) return deny(m);
       if (t.players.length >= 100) return deny('The table is full.');
-      t.players.push({ id: t.nextId++, name, start: a.buyin, balance: a.buyin, added: 0, takes: 0, owner: actor.ref });
+      if (a.fromVault && (ctx.vault || 0) < a.buyin) return deny('Not enough chips in your vault (' + fmt(ctx.vault || 0) + ').');
+      t.players.push(newPlayer(t.nextId++, name, a.buyin, actor.ref));
+      return a.fromVault ? { ok: true, vault: -a.buyin, vaultRef: actor.ref } : { ok: true };
+    }
+    case 'bet': {                                    // next round's wager (changeable until the dealer starts)
+      if (!rounds) return deny('Quick mode: wagers are entered when the hand is settled.');
+      const p = find(a.pid);
+      if (!p) return deny('Player not found.');
+      if (!may(p)) return deny(NOT_YOURS);
+      if (dealerSeat(p)) return deny('The dealer does not bet.');
+      if (p.out) return deny('Sit back in before wagering.');
+      if (p.hand > 0) return deny('Your hand is in play. Wager for the next round after it ends.');
+      if (!Number.isInteger(a.amount) || a.amount < 0) return deny('Wager must be more than $0.');
+      if (a.amount > p.balance) return deny('Wager is more than balance (' + fmt(p.balance) + ').');
+      p.bet = a.amount;
+      return { ok: true, bet: p.bet };
+    }
+    case 'start': {                                  // dealer starts the round once every wager is in
+      if (!rounds) return deny('Rounds are off.');
+      if (!dealerPower) return deny('Only the dealer can start the round.');
+      if (t.round.phase !== 'betting') return deny('A round is already in play.');
+      const ready = t.players.filter(p => !p.out && p.balance > 0 && !dealerSeat(p));
+      if (!ready.length) return deny('Nobody can play yet: players need chips and must not be sitting out.');
+      const waiting = ready.filter(p => !(p.bet > 0));
+      if (waiting.length) return deny('Waiting for wagers from: ' + waiting.map(p => p.name).join(', ') + '.');
+      const over = ready.find(p => p.bet > p.balance);
+      if (over) return deny(over.name + ' wagered more than their balance.');
+      ready.forEach(p => { p.hand = p.bet; p.bet = 0; p.doubled = false; });
+      t.players.forEach(p => { if (!ready.includes(p)) p.bet = 0; });
+      t.round.phase = 'playing';
+      return { ok: true, n: t.round.n, players: ready.length };
+    }
+    case 'double': {                                 // double the wager mid-hand
+      if (!rounds) return deny('Rounds are off.');
+      const p = find(a.pid);
+      if (!p) return deny('Player not found.');
+      if (!may(p)) return deny(NOT_YOURS);
+      if (!(p.hand > 0)) return deny('No hand in play.');
+      if (p.doubled) return deny('Already doubled this hand.');
+      if (p.hand * 2 > p.balance) return deny('Not enough chips to double (' + fmt(p.hand * 2) + ' needed, you have ' + fmt(p.balance) + ').');
+      p.hand *= 2; p.doubled = true;
+      return { ok: true, hand: p.hand };
+    }
+    case 'sitout': {                                 // skip rounds without blocking the Start button
+      if (!rounds) return deny('Rounds are off.');
+      const p = find(a.pid);
+      if (!p) return deny('Player not found.');
+      if (!may(p)) return deny(NOT_YOURS);
+      if (p.hand > 0) return deny('Your hand is in play.');
+      p.out = a.out === true;
+      if (p.out) p.bet = 0;
       return { ok: true };
     }
     case 'settle': {
       const p = find(a.pid);
       if (!p) return deny('Player not found.');
       if (!may(p)) return deny(NOT_YOURS);
-      if (!Number.isInteger(a.wager) || a.wager <= 0) return deny('Wager must be more than $0.');
-      if (a.wager > p.balance) return deny('Wager is more than balance (' + fmt(p.balance) + ').');
+      let wager = a.wager;
+      if (rounds) {
+        if (!(p.hand > 0)) return deny('No hand in play for ' + p.name + '. Wait for the dealer to start the round.');
+        wager = p.hand;
+      } else {
+        if (!Number.isInteger(a.wager) || a.wager <= 0) return deny('Wager must be more than $0.');
+        if (a.wager > p.balance) return deny('Wager is more than balance (' + fmt(p.balance) + ').');
+      }
       let delta;
-      if (a.outcome === 'win') delta = a.wager;                        // 1:1
-      else if (a.outcome === 'blackjack') delta = Math.round(a.wager * 3 / 2); // 3:2
+      if (a.outcome === 'win') delta = wager;                        // 1:1
+      else if (a.outcome === 'blackjack') delta = Math.round(wager * 3 / 2); // 3:2
       else if (a.outcome === 'push') delta = 0;
-      else if (a.outcome === 'loss') delta = -a.wager;
+      else if (a.outcome === 'loss') delta = -wager;
       else return deny('Unknown outcome.');
       p.balance += delta;
-      logHand(p, a.outcome, a.wager, delta);
+      logHand(p, a.outcome, wager, delta);
+      if (rounds) { p.hand = 0; p.doubled = false; }
+      if (p.bet > p.balance) p.bet = p.balance;
+      roundOver();
       return { ok: true, delta, balance: p.balance };
     }
     case 'insurance': {                              // side bet = half the main wager, pays 2:1
       const p = find(a.pid);
       if (!p) return deny('Player not found.');
       if (!may(p)) return deny(NOT_YOURS);
-      if (!Number.isInteger(a.wager) || a.wager <= 0) return deny('Wager must be more than $0.');
+      let wager = a.wager;
+      if (rounds) { if (!(p.hand > 0)) return deny('No hand in play.'); wager = p.hand; }
+      else if (!Number.isInteger(a.wager) || a.wager <= 0) return deny('Wager must be more than $0.');
       if (a.result !== 'win' && a.result !== 'loss') return deny('Unknown insurance result.');
-      const side = Math.floor(a.wager / 2);
+      const side = Math.floor(wager / 2);
       if (side <= 0) return deny('Wager is too small to insure.');
-      if (a.wager + side > p.balance) return deny('Not enough chips to also insure (' + fmt(side) + ' on top of the bet).');
+      if (wager + side > p.balance) return deny('Not enough chips to also insure (' + fmt(side) + ' on top of the bet).');
       const delta = a.result === 'win' ? side * 2 : -side;
       p.balance += delta;
       logHand(p, a.result === 'win' ? 'insurance_win' : 'insurance_loss', side, delta);
       return { ok: true, delta, balance: p.balance };
     }
-    case 'rebuy': {                                  // adding chips is logged so everyone can see it
+    case 'rebuy': {                                  // taking chips from the bank is logged so everyone can see it
       const p = find(a.pid);
       if (!p) return deny('Player not found.');
       if (!may(p)) return deny(NOT_YOURS);
@@ -163,31 +250,119 @@ export function applyAction(t, actor, a) {
       logHand(p, 'rebuy', fee, got);                        // wager column = the fee
       return { ok: true, delta: got, fee, balance: p.balance };
     }
+    case 'trivia': {                                 // a correct answer pays a slice of the trivia allowance, once per match
+      const p = find(a.pid);
+      if (!p) return deny('Player not found.');
+      if (!(host || mine(p))) return deny(NOT_YOURS);
+      const pct = t.settings.triviaPct;
+      if (!pct) return deny('The host turned trivia off.');
+      if (p.triviaAt === matchKey()) return deny('You already answered a trivia question this ' + (rounds ? 'round' : 'hand') + '.');
+      const allowance = Math.floor(p.start * pct / 100);
+      const remaining = allowance - p.trivia;
+      if (remaining < 1) return deny('You have used all your trivia winnings (' + fmt(allowance) + ' max).');
+      const reward = Math.min(remaining, Math.max(1, Math.floor(allowance / 5)));
+      p.balance += reward; p.trivia += reward;
+      logHand(p, 'trivia', 0, reward);
+      p.triviaAt = matchKey();                       // after logging so quick mode's per-hand key stays put
+      return { ok: true, delta: reward, balance: p.balance, remaining: remaining - reward };
+    }
+    case 'vault_deposit': {                          // move chips from the table into your savings vault
+      const p = find(a.pid);
+      if (!p) return deny('Player not found.');
+      if (!mine(p)) return deny('You can only use your own vault.');
+      if (!isCents(a.amount)) return deny('Enter an amount to save.');
+      if (a.amount > p.balance - p.hand) return deny('You can only save chips that are not in play (' + fmt(p.balance - p.hand) + ' available).');
+      p.balance -= a.amount; p.vout += a.amount;
+      if (p.bet > p.balance) p.bet = p.balance;
+      logHand(p, 'vault_out', 0, -a.amount);
+      return { ok: true, balance: p.balance, vault: a.amount, vaultRef: actor.ref };
+    }
+    case 'vault_withdraw': {                         // bring saved chips back to the table (no fee, not a bank trip)
+      const p = find(a.pid);
+      if (!p) return deny('Player not found.');
+      if (!mine(p)) return deny('You can only use your own vault.');
+      if (!isCents(a.amount)) return deny('Enter an amount to withdraw.');
+      const m = overMax(a.amount); if (m) return deny(m);
+      if ((ctx.vault || 0) < a.amount) return deny('Not enough chips in your vault (' + fmt(ctx.vault || 0) + ').');
+      p.balance += a.amount; p.vin += a.amount;
+      logHand(p, 'vault_in', 0, a.amount);
+      return { ok: true, balance: p.balance, vault: -a.amount, vaultRef: actor.ref };
+    }
     case 'undo': {
       let idx = -1;
-      if (host) idx = t.history.length - 1;
+      if (dealerPower) idx = t.history.length - 1;
       else {
         const seat = t.players.find(mine);
         if (!seat) return deny('You do not have a seat.');
         for (let i = t.history.length - 1; i >= 0; i--) if (t.history[i].pid === seat.id) { idx = i; break; }
       }
       if (idx < 0) return deny('No hands to undo.');
-      const h = t.history.splice(idx, 1)[0];
+      const h = t.history[idx];
+      if (h.outcome === 'vault_in' || h.outcome === 'vault_out') return deny('Vault moves can not be undone.');
+      const hand = ['win', 'loss', 'blackjack', 'push'].includes(h.outcome);
+      if (rounds && hand && t.round.phase !== 'playing') return deny('That round is over, so its hands can no longer be undone.');
+      t.history.splice(idx, 1);
       const p = find(h.pid);
-      if (p) { p.balance -= h.delta; if (h.outcome === 'rebuy') { p.added = Math.max(0, p.added - h.delta - h.wager); p.takes = Math.max(0, p.takes - 1); } } // newest entry of that seat, so the balance can't go negative
+      if (p) {
+        p.balance -= h.delta;                       // newest entry of that seat, so the balance can't go negative
+        if (h.outcome === 'rebuy') { p.added = Math.max(0, p.added - h.delta - h.wager); p.takes = Math.max(0, p.takes - 1); }
+        if (h.outcome === 'trivia') { p.trivia = Math.max(0, p.trivia - h.delta); p.triviaAt = -1; }
+        if (rounds && hand) { p.hand = h.wager; p.doubled = true; }      // the hand is back in play
+      }
       return { ok: true, entry: h, playerFound: !!p };
     }
     case 'remove': {                                 // host removes anyone; a player can only leave their own seat
       const p = find(a.pid);
       if (!p) return deny('Player not found.');
-      if (!may(p)) return deny(NOT_YOURS);
+      if (!(host || mine(p))) return deny(NOT_YOURS);
       t.players = t.players.filter(x => x.id !== p.id);
+      if (p.owner && t.dealerReq === p.owner) t.dealerReq = '';
+      roundOver();
       return { ok: true };
     }
     case 'reset': {
       if (!host) return deny('Only the host can reset the table.');
-      t.players.forEach(p => { p.balance = p.start; p.added = 0; p.takes = 0; });
+      t.players.forEach(p => { p.balance = p.start; p.added = 0; p.takes = 0; p.bet = 0; p.hand = 0; p.doubled = false; p.out = false; p.trivia = 0; p.triviaAt = -1; p.vin = 0; p.vout = 0; });
       t.history = [];
+      t.round = { n: 1, phase: 'betting' };
+      return { ok: true };
+    }
+    case 'dealer_request': {                         // ask to take over dealing
+      if (!rounds) return deny('Rounds are off.');
+      if (host) return deny('The host can just take the deck back.');
+      if (!t.players.some(mine)) return deny('Take a seat first.');
+      if (dealerRef) return deny('You are already the dealer.');
+      if (t.dealerReq) return deny(t.dealerReq === actor.ref ? 'Your request is already waiting.' : 'Someone else already asked to deal.');
+      if (t.round.phase !== 'betting' || handsInPlay()) return deny('Finish the round first.');
+      t.dealerReq = actor.ref;
+      return { ok: true };
+    }
+    case 'dealer_cancel': {
+      if (!(dealerPower || (actor.ref && actor.ref === t.dealerReq))) return deny('Nothing to cancel.');
+      t.dealerReq = '';
+      return { ok: true };
+    }
+    case 'dealer_reject': {
+      if (!dealerPower) return deny('Only the dealer can answer.');
+      if (!t.dealerReq) return deny('No request to answer.');
+      t.dealerReq = '';
+      return { ok: true };
+    }
+    case 'dealer_accept': {
+      if (!dealerPower) return deny('Only the dealer can answer.');
+      if (!t.dealerReq) return deny('No request to answer.');
+      if (t.round.phase !== 'betting' || handsInPlay()) return deny('Finish the round first.');
+      t.dealer = t.dealerReq; t.dealerReq = '';
+      t.players.forEach(p => { if (dealerSeat(p)) p.bet = 0; });
+      return { ok: true };
+    }
+    case 'dealer_set': {                             // host: hand the deck to a seat's owner, or take it back ('')
+      if (!host) return deny('Only the host can assign the dealer.');
+      if (t.round.phase !== 'betting' || handsInPlay()) return deny('Finish the round first.');
+      const ref = typeof a.ref === 'string' ? a.ref : '';
+      if (ref && !t.players.some(p => p.owner === ref)) return deny('That player has no seat.');
+      t.dealer = ref; t.dealerReq = '';
+      t.players.forEach(p => { if (dealerSeat(p)) p.bet = 0; });
       return { ok: true };
     }
     case 'settings': {
@@ -204,6 +379,15 @@ export function applyAction(t, actor, a) {
       if (a.bankLimit !== undefined) {
         if (!Number.isInteger(a.bankLimit) || a.bankLimit < 0 || a.bankLimit > 20) return deny('Bank limit must be a whole number from 0 to 20.');
         t.settings.bankLimit = a.bankLimit;
+      }
+      if (a.triviaPct !== undefined) {
+        if (!Number.isInteger(a.triviaPct) || a.triviaPct < 0 || a.triviaPct > 20) return deny('Trivia bonus must be a whole number from 0 to 20 (percent of the starting chips).');
+        t.settings.triviaPct = a.triviaPct;
+      }
+      if (a.rounds !== undefined) {
+        if (typeof a.rounds !== 'boolean') return deny('Bad setting.');
+        t.settings.rounds = a.rounds;
+        if (!a.rounds) { t.players.forEach(p => { p.hand = 0; p.bet = 0; p.doubled = false; }); t.round.phase = 'betting'; t.dealerReq = ''; }
       }
       return { ok: true };
     }
@@ -284,6 +468,12 @@ export default {
       return json({ error: 'not found' }, 404);
     }
 
+    if (url.pathname === '/api/vault' && request.method === 'GET') {          // my saved chips (kept between games)
+      const me = await identify(request, env);
+      if (!me.ok || !me.ref) return json({ error: 'not approved' }, 403);
+      return withCors(await reg(env, '/vault/get', { ref: me.ref }));
+    }
+
     const m = url.pathname.match(/^\/api\/rooms(?:\/([A-Za-z0-9]{4,6})(\/act)?)?$/);
     if (!m) return json({ error: 'not found' }, 404);
     const who = await identify(request, env);
@@ -336,7 +526,7 @@ function withCors(res) {
 }
 
 export class Room {
-  constructor(state) { this.state = state; }
+  constructor(state, env) { this.state = state; this.env = env; }
 
   async fetch(request) {
     const path = new URL(request.url).pathname;
@@ -362,12 +552,22 @@ export class Room {
       let body;
       try { body = JSON.parse(await request.text()); } catch (e) { return json({ ok: false, error: 'Bad request.' }, 400); }
       const table = normalizeTable(await this.state.storage.get('table'));
-      const res = applyAction(table, { role: isHost ? 'host' : 'player', ref: request.headers.get('X-Ref') || '' }, body && body.action);
+      const ref = request.headers.get('X-Ref') || '';
+      const act = body && body.action;
+      let vault;                                       // savings vault balance, only fetched when an action needs it
+      if (act && (act.type === 'vault_withdraw' || (act.type === 'seat' && act.fromVault)) && ref) vault = (await (await reg(this.env, '/vault/get', { ref })).json()).balance;
+      const res = applyAction(table, { role: isHost ? 'host' : 'player', ref }, act, { vault });
       if (!res.ok) return json({ ok: false, error: res.error }, 400);
+      let vaultBalance;
+      if (res.vault) {                                 // the vault is updated first: if it refuses, the table is not saved
+        const vr = await reg(this.env, '/vault/add', { ref: res.vaultRef, delta: res.vault });
+        if (!vr.ok) return json({ ok: false, error: 'Not enough chips in your vault.' }, 400);
+        vaultBalance = (await vr.json()).balance;
+      }
       const v = live.v + 1;
       await this.state.storage.put('table', table);
       await this.state.storage.put('meta', { token: live.token, v, updated: now });
-      return json({ ok: true, v, state: table, delta: res.delta, balance: res.balance, entry: res.entry, playerFound: res.playerFound });
+      return json({ ok: true, v, state: table, delta: res.delta, balance: res.balance, entry: res.entry, playerFound: res.playerFound, fee: res.fee, vaultBalance });
     }
 
     if (request.method === 'GET') {
@@ -382,6 +582,8 @@ export class Room {
     if (!body || !validState(body.state)) return json({ error: 'bad state' }, 400);
     if (live.v !== 0) return json({ error: 'This table has already started.' }, 409);
     const seed = normalizeTable(Object.assign({}, body.state, {
+      settings: Object.assign({}, body.state.settings, { rounds: true }),   // online tables play in rounds
+      round: undefined, dealer: '', dealerReq: '',
       players: body.state.players.map(p => ({ id: p.id, name: p.name, start: p.start, balance: p.balance, added: p.added, takes: p.takes })), // no owners
     }));
     await this.state.storage.put('table', seed);
@@ -437,6 +639,18 @@ export class Registry {
       if (b.action === 'remove') { await s.delete('d:' + id); await s.delete('r:' + b.ref); }
       else { d.status = b.action === 'approve' ? 'approved' : 'blocked'; await s.put('d:' + id, d); }
       return json({ ok: true });
+    }
+
+    if (path === '/vault/get') {
+      return json({ balance: (await s.get('v:' + b.ref)) || 0 });
+    }
+
+    if (path === '/vault/add') {                     // credit (+) or debit (-); never below zero
+      if (!REF_RE.test(String(b.ref || '')) || !Number.isInteger(b.delta)) return json({ error: 'bad request' }, 400);
+      const next = ((await s.get('v:' + b.ref)) || 0) + b.delta;
+      if (next < 0 || next > MAX_CENTS) return json({ error: 'vault limit' }, 409);
+      await s.put('v:' + b.ref, next);
+      return json({ balance: next });
     }
 
     if (path === '/self') { // the admin's own device
