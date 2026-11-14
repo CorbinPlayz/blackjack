@@ -1,3 +1,4 @@
+// LEGACY: exercises the retired name-only access request flow; fails by design since Google sign-in became required. See google/admin tests.
 const fs = require('fs'), vm = require('vm'), assert = require('assert');
 const S = '/tmp/claude-0/-home-claude/3c512fd1-8a16-5647-acf2-2a8d2257fd0e/scratchpad';
 let n = 0; const ok = (c, m) => { assert.ok(c, m); n++; console.log('PASS', m); };

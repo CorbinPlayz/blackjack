@@ -15,6 +15,13 @@ Worker (with autoBet, start-anyway, finish, undo-reopens-round, in-page confirm 
 - `window.confirm` replaced by `askConfirm()` (#confirmModal): likely cause of "can't stop hosting" / "can't remove players". Not yet confirmed on a real phone.
 - Quick rounds: auto-repeat wager (Host tab toggle), quick-bet buttons, dealer settle board, "Start now without X", "Push all remaining hands", undo reopens a just-finished round, 1.5s polling.
 
+## Google required + Google admins (deployed 2026-11-14)
+- Admin = holder of the `ADMIN_KEY` secret OR a signed-in Google account whose email is in the `ADMIN_EMAILS` Worker secret (comma-separated, case-insensitive, never put emails in the repo). Admin emails are auto-approved on sign-in, and the client shows the Admin tab without a key (`isAdminAcct`, `adminHdr()`).
+- To make someone admin: the user sends the Google email; set `ADMIN_EMAILS` via Cloudflare API (PUT script secret `secret_text`) with the full comma list. STILL PENDING: user has not yet sent the email(s).
+- The owner's own device can still be approved with the key (`/api/admin/self`, `owner:true`).
+- Tests: `tests/admin.test.mjs` (13), `tests/google.test.mjs` (17). `tests/test2.js` is LEGACY (tests the retired name flow) and fails by design.
+- Keep this file updated with EVERY change (user request).
+
 ## TO DO next
 1. Ask the user to retest on real phones: stop hosting after a refresh, remove a player, a full quick round.
 2. Get the rest of the "lots of bugs" list from the first play session.

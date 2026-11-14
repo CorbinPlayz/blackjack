@@ -53,3 +53,7 @@ Tables expire after 24 hours idle. Hosting uses a secret token that only the hos
 ## Google accounts
 
 Players sign in with **Sign in with Google** (Google Identity Services). The worker verifies the ID token itself (RS256 signature against Google's published keys, audience = the Client ID, issuer, expiry, verified email). A new email lands in the admin's "Waiting for approval" list, and the admin can also pre-approve an email in the admin panel. Approval, blocking, seats and the vault belong to the Google account, so they follow the person to any phone. The name-request flow is still there as a fallback.
+
+
+## Access
+Google sign-in is required. New accounts wait for admin approval. Admins are the holder of the `ADMIN_KEY` secret plus any Google emails listed in the `ADMIN_EMAILS` Worker secret (comma-separated); those are approved automatically and see the Admin tab without a key.

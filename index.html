@@ -279,7 +279,7 @@
   <h2>Private table</h2>
   <div class="online-status" id="gateChecking">Checking access…</div>
   <div id="gateGoogle" hidden>
-    <div class="online-status">Sign in with Google. Once the host approves your email, your seat and vault follow you to any phone.</div>
+    <div class="online-status">Sign in with your Google account to play. The host approves your email once, then your seat and vault follow you to any phone.</div>
     <div id="gGoogle" style="min-height:44px;margin:8px 0"></div>
   </div>
   <div id="gateRequest" hidden>
@@ -1888,10 +1888,10 @@ var Core = (function () {
   bgStart();
 
   /* ---------- tabs ---------- */
-  var TAB_KEY = 'bjTab.v1', curTab = lsGet(TAB_KEY) || 'table', adminTab = false;
+  var TAB_KEY = 'bjTab.v1', curTab = lsGet(TAB_KEY) || 'table', adminTab = false, isAdminAcct = false;
   function tabVisible(n) {
     if (n === 'host') return !isPlayer();
-    if (n === 'admin') return !!ONLINE_URL && (adminTab || !!adminKeyVal());
+    if (n === 'admin') return !!ONLINE_URL && (adminTab || isAdminAcct || !!adminKeyVal());
     return ['table', 'board', 'me'].indexOf(n) >= 0;
   }
   function renderTabs() {
@@ -2831,12 +2831,13 @@ var Core = (function () {
 
   function gateMsg(t) { $('gateMsg').textContent = t || ''; }
   function adminKeyVal() { return lsGet(ADMIN_STORE) || ''; }
+  function adminHdr() { var k = adminKeyVal(); return k ? { 'X-Admin-Key': k } : {}; }   // Google admins need no key: the server knows who they are
 
   function renderGate() {
     $('appRoot').hidden = true;
     $('gatePanel').hidden = false;
     $('gateChecking').hidden = access !== 'checking';
-    $('gateRequest').hidden = access !== 'none';
+    $('gateRequest').hidden = true;                  // Google sign-in is required: no more name-only requests
     $('gateGoogle').hidden = !(access === 'none' || access === 'pending' || access === 'blocked') || !GOOGLE_CLIENT_ID;
     if (access === 'none') fxSafe(loadGoogle);
     $('gatePending').hidden = access !== 'pending';
@@ -2875,7 +2876,9 @@ var Core = (function () {
       if (!r.ok) throw new Error('status ' + r.status);
       var d = await r.json();
       if (d.ref && d.ref !== myRef) { myRef = d.ref; lsSet(REF_KEY, d.ref); if (started) render(); }
+      var wasAdmin = isAdminAcct; isAdminAcct = d.admin === true;
       applyAccess(d.status === 'approved' || d.status === 'pending' || d.status === 'blocked' ? d.status : 'none');
+      if (isAdminAcct && !wasAdmin && d.status === 'approved' && started) { renderTabs(); adminLoad(); }
     } catch (e) {
       if (access === 'checking') { access = 'none'; renderGate(); gateMsg('Could not reach the server. Check your connection.'); }
     }
@@ -2969,10 +2972,10 @@ var Core = (function () {
 
   async function adminLoad() {
     var key = adminKeyVal();
-    if (!key) { $('adminKeyBox').hidden = false; $('adminList').innerHTML = ''; return; }
+    if (!key && !isAdminAcct) { $('adminKeyBox').hidden = false; $('adminList').innerHTML = ''; return; }
     try {
-      var r = await api('/api/admin/devices', { headers: { 'X-Admin-Key': key } });
-      if (r.status === 401) { lsDel(ADMIN_STORE); $('adminKeyBox').hidden = false; adminMsg('That admin key is no longer valid.'); return; }
+      var r = await api('/api/admin/devices', { headers: adminHdr() });
+      if (r.status === 401) { if (key) lsDel(ADMIN_STORE); $('adminKeyBox').hidden = false; adminMsg(key ? 'That admin key is no longer valid.' : 'This Google account is not an admin.'); return; }
       if (!r.ok) throw new Error('status ' + r.status);
       var devices = (await r.json()).devices || [];
       var waiting = devices.filter(function (d) { return d.status === 'pending'; }).length;
@@ -2997,7 +3000,7 @@ var Core = (function () {
   async function adminAct(ref, act) {
     try {
       var r = await api('/api/admin/devices/' + ref, {
-        method: 'POST', headers: { 'X-Admin-Key': adminKeyVal(), 'Content-Type': 'application/json' },
+        method: 'POST', headers: Object.assign({ 'Content-Type': 'application/json' }, adminHdr()),
         body: JSON.stringify({ action: act })
       });
       if (!r.ok) throw new Error('status ' + r.status);
@@ -3010,7 +3013,7 @@ var Core = (function () {
     var em = $('adminEmail').value.trim().toLowerCase();
     if (!/^[^\s@<>]+@[^\s@<>]+$/.test(em)) { adminMsg('Enter a full email address.'); return; }
     try {
-      var r = await api('/api/admin/email', { method: 'POST', headers: { 'X-Admin-Key': adminKeyVal(), 'Content-Type': 'application/json' }, body: JSON.stringify({ email: em }) });
+      var r = await api('/api/admin/email', { method: 'POST', headers: Object.assign({ 'Content-Type': 'application/json' }, adminHdr()), body: JSON.stringify({ email: em }) });
       if (!r.ok) throw new Error('status ' + r.status);
       $('adminEmail').value = ''; adminMsg(em + ' is allowed. They can now sign in with Google.');
     } catch (err) { adminMsg('That did not go through. Try again.'); return; }
@@ -3048,7 +3051,7 @@ var Core = (function () {
     $('appRoot').hidden = false;
     $('adminBtn').hidden = !ONLINE_URL;
     renderTabs();
-    if (ONLINE_URL && adminKeyVal()) adminLoad();
+    if (ONLINE_URL && (adminKeyVal() || isAdminAcct)) adminLoad();
     if (started) return;
     started = true;
     // Re-check with the server while the app is open, so removing or blocking someone locks them out.
@@ -3066,7 +3069,7 @@ var Core = (function () {
       var jm = typeof location !== 'undefined' ? /[?&]join=([A-Za-z0-9]{4,6})/.exec(String(location.search || '')) : null;
       if (jm && !online.role) $('joinCode').value = jm[1].toUpperCase();
     } catch (e) {}
-    if (ONLINE_URL && adminKeyVal()) adminLoad();
+    if (ONLINE_URL && (adminKeyVal() || isAdminAcct)) adminLoad();
   }
 
   if (!ONLINE_URL) { access = 'approved'; startApp(); }

@@ -433,24 +433,30 @@ function reg(env, path, body) {
   return stub.fetch('https://registry' + path, { method: 'POST', body: JSON.stringify(body || {}) });
 }
 
-// Admin = holder of the ADMIN_KEY secret. If the secret is not set, admin is disabled.
-function adminOk(request, env) {
+// Admins: whoever holds the ADMIN_KEY secret, plus any Google account listed in the ADMIN_EMAILS secret
+// (comma-separated). The emails live in a secret so they never end up in the public repo.
+function adminEmails(env) {
+  return String(env.ADMIN_EMAILS || '').toLowerCase().split(/[\s,;]+/).filter(Boolean);
+}
+function keyOk(request, env) {
   const k = request.headers.get('X-Admin-Key') || '';
   return !!env.ADMIN_KEY && timingSafeEqual(k, env.ADMIN_KEY);
 }
 
-// Who is calling? Tables may only be used by an approved device (or the admin key).
-// 'ref' is the device's public id; it is what marks which seat a player owns.
+// Who is calling? Google is required: only a device signed in to an approved Google account gets in.
+// 'ref' is the account's public id; it is what marks which seat a player owns.
 async function identify(request, env) {
-  const admin = adminOk(request, env);
+  const key = keyOk(request, env);
   const id = request.headers.get('X-Device-Id') || '';
-  let ok = false, ref = '';
+  let ok = false, ref = '', email = '';
   if (ID_RE.test(id)) {
     const d = await (await reg(env, '/status', { deviceId: id })).json();
-    if (d.status === 'approved') { ok = true; ref = d.ref || ''; }
+    if (d.status === 'approved') { ok = true; ref = d.ref || ''; email = d.email || ''; }
   }
-  return { ok: ok || admin, ref };
+  const admin = key || (ok && !!email && adminEmails(env).includes(email));
+  return { ok: ok || key, ref, email, admin };
 }
+async function isAdmin(request, env) { return (await identify(request, env)).admin; }
 
 async function readJson(request) {
   try { return await request.json(); } catch (e) { return {}; }
@@ -508,12 +514,16 @@ export default {
     if (url.pathname === '/api/access/status' && request.method === 'GET') {
       const id = request.headers.get('X-Device-Id') || '';
       if (!ID_RE.test(id)) return json({ status: 'none' });
-      return withCors(await reg(env, '/status', { deviceId: id }));
+      const d = await (await reg(env, '/status', { deviceId: id })).json();
+      const admin = !!d.email && adminEmails(env).includes(d.email);
+      if (admin && d.status === 'pending') {                       // an admin email is let in as soon as it shows up
+        await reg(env, '/preapprove', { email: d.email });
+        d.status = 'approved';
+      }
+      return json({ status: d.status, ref: d.ref, admin });
     }
     if (url.pathname === '/api/access/request' && request.method === 'POST') {
-      const b = await readJson(request);
-      if (!ID_RE.test(String(b.deviceId || ''))) return json({ error: 'bad device' }, 400);
-      return withCors(await reg(env, '/request', { deviceId: b.deviceId, name: b.name }));
+      return json({ error: 'Sign in with Google to ask for access.' }, 403);   // the name-only request is retired
     }
     if (url.pathname === '/api/access/google' && request.method === 'POST') {     // sign in with Google: links this device to the account
       const b = await readJson(request);
@@ -522,10 +532,12 @@ export default {
       try { who = await verifyIdToken(b.idToken, await googleKeys(), GOOGLE_CLIENT_ID, Math.floor(Date.now() / 1000)); }
       catch (e) { return json({ error: 'Could not reach Google. Try again.' }, 502); }
       if (!who) return json({ error: 'Google sign-in could not be verified.' }, 401);
-      return withCors(await reg(env, '/google', { deviceId: b.deviceId, email: who.email, name: who.name }));
+      const r = await (await reg(env, '/google', { deviceId: b.deviceId, email: who.email, name: who.name })).json();
+      if (adminEmails(env).includes(who.email) && r.status === 'pending') { await reg(env, '/preapprove', { email: who.email }); r.status = 'approved'; }
+      return json({ status: r.status, ref: r.ref });
     }
     if (url.pathname.startsWith('/api/admin/')) {
-      if (!adminOk(request, env)) return json({ error: 'unauthorized' }, 401);
+      if (!(await isAdmin(request, env))) return json({ error: 'unauthorized' }, 401);
       if (url.pathname === '/api/admin/devices' && request.method === 'GET') return withCors(await reg(env, '/list'));
       if (url.pathname === '/api/admin/self' && request.method === 'POST') {
         const b = await readJson(request);
@@ -687,7 +699,8 @@ export class Registry {
         const a = await s.get('g:' + d.google);
         return json({ status: a ? a.status : 'none', ref: a ? a.ref : undefined, email: d.google });
       }
-      return json({ status: d ? d.status : 'none', ref: d ? d.ref : undefined });
+      if (d && d.owner === true) return json({ status: d.status, ref: d.ref });          // the owner's own device, approved with the admin key
+      return json({ status: 'none' });                                                    // old name-only approvals no longer count: Google is required
     }
 
     if (path === '/google') {
@@ -774,10 +787,10 @@ export class Registry {
     if (path === '/self') { // the admin's own device
       const key = 'd:' + b.deviceId;
       const existing = await s.get(key);
-      if (existing) { existing.status = 'approved'; delete existing.google; await s.put(key, existing); return json({ status: 'approved' }); }
+      if (existing) { existing.status = 'approved'; existing.owner = true; delete existing.google; await s.put(key, existing); return json({ status: 'approved' }); }
       let ref;
       do { ref = randomString(8, ALNUM); } while (await s.get('r:' + ref));
-      await s.put(key, { ref, name: 'Admin', status: 'approved', requested: Date.now() });
+      await s.put(key, { ref, name: 'Admin', status: 'approved', owner: true, requested: Date.now() });
       await s.put('r:' + ref, b.deviceId);
       return json({ status: 'approved' });
     }
