@@ -646,7 +646,7 @@ export class Room {
       const v = live.v + 1;
       await this.state.storage.put('table', table);
       await this.state.storage.put('meta', { token: live.token, v, updated: now });
-      return json({ ok: true, v, state: table, delta: res.delta, balance: res.balance, entry: res.entry, playerFound: res.playerFound, fee: res.fee, vaultBalance });
+      return json({ ok: true, v, state: table, delta: res.delta, balance: res.balance, entry: res.entry, playerFound: res.playerFound, fee: res.fee, hand: res.hand, n: res.n, skipped: res.skipped, vaultBalance });
     }
 
     if (request.method === 'GET') {
