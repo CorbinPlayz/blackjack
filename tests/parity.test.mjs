@@ -9,7 +9,7 @@ const money = c => (c / 100).toFixed(2);
 const snap = (ps, hs) => JSON.stringify({ p: ps.map(p => [p.id, p.name, p.start, p.balance, p.added || 0]), h: hs.map(h => [h.id, h.pid, h.name, h.outcome, h.wager, h.delta]) });
 let ops = 0, oks = 0;
 for (let game = 0; game < 60; game++) {
-  const core = newCore(), t = normalizeTable({}), host = { role: 'host', ref: '' };
+  const core = newCore(), t = normalizeTable({ settings: { rounds: false } }), host = { role: 'host', ref: '' };
   for (let i = 0; i < 250; i++) {
     const ids = core.state.players.map(p => p.id); const pid = ids.length ? ids[ri(0, ids.length - 1)] : 999;
     const bal = (core.state.players.find(p => p.id === pid) || { balance: 5000 }).balance;

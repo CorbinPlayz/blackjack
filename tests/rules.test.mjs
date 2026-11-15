@@ -2,7 +2,7 @@ import assert from 'assert';
 const { applyAction, normalizeTable } = await import('./worker.mjs');
 let n = 0; const ok = (c, m) => { assert.ok(c, m); n++; console.log('PASS', m); };
 const H = { role: 'host', ref: '' }, A = { role: 'player', ref: 'AAAAAAAA' }, B = { role: 'player', ref: 'BBBBBBBB' };
-const t = normalizeTable({});
+const t = normalizeTable({ settings: { rounds: false } });
 ok(applyAction(t, H, { type: 'add', name: 'Dealer-added', start: 10000 }).ok, 'host adds a player');
 ok(applyAction(t, A, { type: 'seat', name: 'Ann', buyin: 10000 }).ok, 'player takes own seat with own buy-in');
 ok(applyAction(t, B, { type: 'seat', name: 'Bob', buyin: 50000 }).ok, 'second player takes a seat');

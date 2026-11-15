@@ -324,6 +324,7 @@
 <div class="panel banner" id="lockBanner" hidden>The host has paused the table. You can watch, but not change anything, until it resumes.</div>
 
 <div class="panel" id="roundPanel" hidden></div>
+<div class="panel banner" id="hostFundHint" hidden>Every seat is paid for from a real bank account, so nobody can be added with free chips. Ask each player to join the table and take their own seat. Chips go back to their account when they leave.</div>
 <!-- ADD PLAYER / TAKE A SEAT (no <form>: avoids submission/reload bugs) -->
 <div class="panel" id="addPanel">
   <h2 id="addTitle">Add player</h2>
@@ -1923,8 +1924,10 @@ var Core = (function () {
   function render() {
     renderTabs();
     var pr = isPlayer(), seat = pr ? mySeat() : null, locked = paused();
-    $('addPanel').hidden = pr && (!!seat || locked);
-    $('addTitle').textContent = pr ? 'Take a seat' : 'Add player';
+    var hostOnline = online.role === 'host';
+    $('addPanel').hidden = hostOnline || (pr && (!!seat || locked));
+    $('hostFundHint').hidden = !hostOnline;
+    $('addTitle').textContent = pr ? 'Take a seat' + (vaultBal !== null ? ' · bank ' + Core.fmt(vaultBal) : '') : 'Add player';
     $('addBtn').textContent = pr ? 'Take seat' : 'Add Player';
     nameEl.placeholder = pr ? 'Your name' : 'Name';
     $('toolbar').hidden = pr && (!seat || locked);
@@ -2109,7 +2112,7 @@ var Core = (function () {
         det.open = !!chipsOpen[p.id];
         det.addEventListener('toggle', function () { chipsOpen[p.id] = det.open; });
         det.appendChild(el('summary', null, rmode ? 'More: bank, insurance' : 'More: add chips, insurance'));
-        det.appendChild(el('div', 'sub', 'Take chips from the bank (' + Core.state.settings.bankFee + '% fee' + (Core.state.settings.bankLimit ? ', ' + Math.max(0, Core.state.settings.bankLimit - (p.takes || 0)) + ' of ' + Core.state.settings.bankLimit + ' trips left' : '') + ')'));
+        det.appendChild(el('div', 'sub', (online.role ? 'Take more money from your bank account to the table (' : 'Take chips from the bank (') + Core.state.settings.bankFee + '% fee' + (Core.state.settings.bankLimit ? ', ' + Math.max(0, Core.state.settings.bankLimit - (p.takes || 0)) + ' of ' + Core.state.settings.bankLimit + ' trips left' : '') + ')'));
         var crow = el('div', 'row mt');
         var cin = el('input'); cin.type = 'text'; cin.id = 'c' + p.id; cin.placeholder = 'Chips $';
         cin.setAttribute('inputmode', 'decimal'); cin.setAttribute('autocomplete', 'off'); cin.setAttribute('data-chips', p.id);
@@ -2178,7 +2181,7 @@ var Core = (function () {
       case 'add':
         c = Core.checkPlayer(a.name, a.startText); if (!c.ok) return c;
         body = isPlayer() ? { type: 'seat', name: c.name, buyin: c.cents } : { type: 'add', name: c.name, start: c.cents };
-        if (isPlayer() && $('fromVault') && $('fromVault').checked) body.fromVault = true;
+        if (isPlayer()) body.fromVault = true;                // online buy-ins always come out of your bank account
         break;
       case 'settle':
         c = roundsOn() ? { ok: true, cents: 0 } : Core.checkWager(a.wagerText); if (!c.ok) return c;   // in rounds the hand in play is the wager
@@ -2400,13 +2403,13 @@ var Core = (function () {
   function renderVault() {
     var pr = isPlayer(), me = pr ? mySeat() : null;
     $('vaultPanel').hidden = !(pr && vaultBal !== null);
-    $('vaultInfo').textContent = 'In your vault: ' + Core.fmt(vaultBal || 0) + '. Saved chips stay yours for next game, with no fee. Withdrawing is free and does not count as a bank trip.';
-    var LT = { grant: 'Welcome grant', mint: 'Added by admin', buyin: 'To a table', cashout: 'From a table' };
+    $('vaultInfo').textContent = 'Your bank account: ' + Core.fmt(vaultBal || 0) + '. Every chip you play with comes out of it, and goes back in when you leave the table or save chips.';
+    var LT = { grant: 'Welcome grant', mint: 'Added by admin', buyin: 'To a table', cashout: 'From a table', trivia: 'Trivia winnings' };
     $('bankLedger').textContent = bankLedger.slice(0, 8).map(function (e) {
       return new Date(e.t).toLocaleDateString() + '  ' + (LT[e.type] || e.type) + '  ' + (e.amount > 0 ? '+' : '-') + Core.fmt(Math.abs(e.amount)) + '  (balance ' + Core.fmt(e.balance) + ')';
     }).join('\n');
     $('vaultSave').hidden = !me; $('vaultTake').hidden = !me;
-    var fv = $('fromVaultRow'), show = pr && !me && (vaultBal || 0) > 0;
+    var fv = $('fromVaultRow'), show = false;                // buy-ins always come from the account now, so there is no checkbox
     if (fv.style) fv.style.display = show ? 'block' : 'none'; fv.hidden = !show;
     $('fromVaultTxt').textContent = 'Use saved chips from my vault (' + Core.fmt(vaultBal || 0) + ') as my buy-in';
   }
@@ -2488,7 +2491,7 @@ var Core = (function () {
   $('resetBtn').addEventListener('click', async function (e) {
     e.preventDefault();
     if (isPlayer() || busy || !Core.state.players.length) return;
-    if (!(await askConfirm('Reset every balance to its starting amount? This also clears recent hands.', 'Reset', true))) return;
+    if (!(await askConfirm(online.role ? 'Clear recent hands and restart the rounds? Chips are real money, so nobody gets chips back or loses any.' : 'Reset every balance to its starting amount? This also clears recent hands.', 'Reset', true))) return;
     busy = true;
     try {
       var res = await perform({ type: 'reset' });
@@ -2539,7 +2542,7 @@ var Core = (function () {
         var p = null;
         Core.state.players.forEach(function (x) { if (x.id === id) p = x; });
         var leaving = isPlayer() && p && p.owner === myRef;
-        if (!p || !(await askConfirm(leaving ? 'Leave the table? You can sit down again later.' : 'Remove ' + p.name + '?', leaving ? 'Leave' : 'Remove', true))) return;
+        if (!p || !(await askConfirm(leaving ? 'Leave the table? Your chips go back to your bank account.' : 'Remove ' + p.name + '?' + (online.role && p.owner ? ' Their chips go back to their bank account.' : ''), leaving ? 'Leave' : 'Remove', true))) return;
         var rr = await perform({ type: 'remove', pid: id });
         if (!rr.ok) { results[id] = { text: rr.error, cls: 'err' }; render(); return; }
         delete wagers[id]; delete results[id]; delete chipsText[id]; delete chipsOpen[id];
@@ -2633,7 +2636,7 @@ var Core = (function () {
         if (!rb.ok) { results[id] = { text: rb.error, cls: 'err' }; }
         else {
           chipsText[id] = '';
-          results[id] = { text: rb.fee ? 'Took ' + Core.fmt(rb.delta + rb.fee) + ' from the bank. Fee ' + Core.fmt(rb.fee) + ', so you got ' + Core.fmt(rb.delta) + '.' : 'Added ' + Core.fmt(rb.delta) + ' in chips', cls: 'neu' };
+          results[id] = { text: rb.fee ? 'Took ' + Core.fmt(rb.delta + rb.fee) + (online.role ? ' from your bank account. Fee ' : ' from the bank. Fee ') + Core.fmt(rb.fee) + ', so you got ' + Core.fmt(rb.delta) + '.' : 'Added ' + Core.fmt(rb.delta) + ' in chips', cls: 'neu' };
         }
         if (rb.ok) renderLocal(); else render();
       }

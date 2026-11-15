@@ -83,6 +83,8 @@ export function normalizeTable(t) {
   const rd = t.round && typeof t.round === 'object' ? t.round : {};
   return {
     players, history,
+    house: Number.isInteger(t.house) ? t.house : 0,       // chips the table's house holds (fees, player losses); negative = the house owes (until the casino pot exists)
+    funded: Number.isInteger(t.funded) ? t.funded : 0,   // money that came in from bank accounts (net): chips on seats + house always add up to this
     nextId: Math.max(typeof t.nextId === 'number' ? t.nextId : 1, maxId + 1),
     nextHid: Math.max(typeof t.nextHid === 'number' ? t.nextHid : 1, maxHid + 1),
     round: { n: Number.isInteger(rd.n) && rd.n > 0 ? rd.n : 1, phase: rd.phase === 'playing' ? 'playing' : 'betting' },
@@ -99,8 +101,19 @@ export function normalizeTable(t) {
 
 function cleanName(n) { return String(n || '').replace(/[\u0000-\u001f<>]/g, '').trim().slice(0, 30); }
 
+// ctx.funded = an online table: every chip comes from (and goes back to) a bank account. res.ops lists the account moves.
 export function applyAction(t, actor, a, ctx) {
+  const ops = [];
+  const res = applyCore(t, actor, a, ctx, ops);
+  if (res.ok && ops.length) res.ops = ops;
+  return res;
+}
+
+function applyCore(t, actor, a, ctx, ops) {
   ctx = ctx || {};
+  const funded = ctx.funded === true;
+  const account = Number.isInteger(ctx.account) ? ctx.account : (ctx.vault || 0);
+  const bankOp = (ref, delta, kind, note, mint) => { const o = { ref, delta, kind, note }; if (mint) o.mint = mint; ops.push(o); };
   const host = actor.role === 'host';
   const deny = error => ({ ok: false, error });
   const dealerRef = !!actor.ref && !!t.dealer && actor.ref === t.dealer;
@@ -131,6 +144,7 @@ export function applyAction(t, actor, a, ctx) {
   switch (a.type) {
     case 'add': {                                    // host adds anyone
       if (!host) return deny('Only the host can add other players.');
+      if (funded) return deny('Every seat is paid for from a bank account. Ask the player to take their own seat.');
       const name = cleanName(a.name);
       if (!name) return deny('Enter a player name.');
       if (!isCents(a.start)) return deny('Starting balance must be more than $0.');
@@ -146,6 +160,13 @@ export function applyAction(t, actor, a, ctx) {
       if (!isCents(a.buyin)) return deny('Starting balance must be more than $0.');
       const m = overMax(a.buyin); if (m) return deny(m);
       if (t.players.length >= 100) return deny('The table is full.');
+      if (funded) {
+        if (account < a.buyin) return deny('Not enough money in your bank account (' + fmt(account) + ').');
+        t.players.push(newPlayer(t.nextId++, name, a.buyin, actor.ref));
+        t.funded += a.buyin;
+        bankOp(actor.ref, -a.buyin, 'buyin', 'Bought in at a table');
+        return { ok: true, vault: -a.buyin, vaultRef: actor.ref };
+      }
       if (a.fromVault && (ctx.vault || 0) < a.buyin) return deny('Not enough chips in your vault (' + fmt(ctx.vault || 0) + ').');
       t.players.push(newPlayer(t.nextId++, name, a.buyin, actor.ref));
       return a.fromVault ? { ok: true, vault: -a.buyin, vaultRef: actor.ref } : { ok: true };
@@ -218,6 +239,7 @@ export function applyAction(t, actor, a, ctx) {
       const p = find(a.pid);
       if (!p) return deny('Player not found.');
       if (!may(p)) return deny(NOT_YOURS);
+      if (funded && mine(p)) return deny('You cannot settle your own hand. Someone else deals and settles it.');
       let wager = a.wager;
       if (rounds) {
         if (!(p.hand > 0)) return deny('No hand in play for ' + p.name + '. Wait for the dealer to start the round.');
@@ -233,6 +255,7 @@ export function applyAction(t, actor, a, ctx) {
       else if (a.outcome === 'loss') delta = -wager;
       else return deny('Unknown outcome.');
       p.balance += delta;
+      if (funded) t.house -= delta;
       logHand(p, a.outcome, wager, delta);
       if (rounds) { p.hand = 0; p.doubled = false; }
       if (p.bet > p.balance) p.bet = p.balance;
@@ -243,6 +266,7 @@ export function applyAction(t, actor, a, ctx) {
       const p = find(a.pid);
       if (!p) return deny('Player not found.');
       if (!may(p)) return deny(NOT_YOURS);
+      if (funded && mine(p)) return deny('You cannot settle your own insurance. Someone else deals and settles it.');
       let wager = a.wager;
       if (rounds) { if (!(p.hand > 0)) return deny('No hand in play.'); wager = p.hand; }
       else if (!Number.isInteger(a.wager) || a.wager <= 0) return deny('Wager must be more than $0.');
@@ -252,6 +276,7 @@ export function applyAction(t, actor, a, ctx) {
       if (wager + side > p.balance) return deny('Not enough chips to also insure (' + fmt(side) + ' on top of the bet).');
       const delta = a.result === 'win' ? side * 2 : -side;
       p.balance += delta;
+      if (funded) t.house -= delta;
       logHand(p, a.result === 'win' ? 'insurance_win' : 'insurance_loss', side, delta);
       return { ok: true, delta, balance: p.balance };
     }
@@ -260,12 +285,17 @@ export function applyAction(t, actor, a, ctx) {
       if (!p) return deny('Player not found.');
       if (!may(p)) return deny(NOT_YOURS);
       if (!isCents(a.amount)) return deny('Enter an amount of chips to add.');
+      if (funded) {
+        if (!mine(p)) return deny('Only the player can take money from their own bank account.');
+        if (account < a.amount) return deny('Not enough money in your bank account (' + fmt(account) + ').');
+      }
       const m = overMax(a.amount); if (m) return deny(m);
       if (t.settings.bankLimit && p.takes >= t.settings.bankLimit) return deny('The bank has cut you off: ' + p.takes + ' of ' + t.settings.bankLimit + ' trips used.');
       const fee = Math.ceil(a.amount * t.settings.bankFee / 100);   // taking chips from the bank costs a fee
       const got = a.amount - fee;
       if (got < 1) return deny('Too small: the ' + t.settings.bankFee + '% bank fee would take all of it.');
       p.balance += got;
+      if (funded) { t.house += fee; t.funded += a.amount; bankOp(actor.ref, -a.amount, 'buyin', 'Bank trip to a table'); }
       p.added += a.amount; p.takes += 1;                    // you took the full amount out, so the fee shows up as a loss
       logHand(p, 'rebuy', fee, got);                        // wager column = the fee
       return { ok: true, delta: got, fee, balance: p.balance };
@@ -281,7 +311,9 @@ export function applyAction(t, actor, a, ctx) {
       const remaining = allowance - p.trivia;
       if (remaining < 1) return deny('You have used all your trivia winnings (' + fmt(allowance) + ' max).');
       const reward = Math.min(remaining, Math.max(1, Math.floor(allowance / 5)));
+      if (funded && !p.owner) return deny('That seat has no bank account.');
       p.balance += reward; p.trivia += reward;
+      if (funded) { t.funded += reward; bankOp(p.owner, 0, 'trivia', 'Trivia winnings', reward); }   // the only new money besides the grant and admin mint
       logHand(p, 'trivia', 0, reward);
       p.triviaAt = matchKey();                       // after logging so quick mode's per-hand key stays put
       return { ok: true, delta: reward, balance: p.balance, remaining: remaining - reward };
@@ -295,6 +327,7 @@ export function applyAction(t, actor, a, ctx) {
       p.balance -= a.amount; p.vout += a.amount;
       if (p.bet > p.balance) p.bet = p.balance;
       logHand(p, 'vault_out', 0, -a.amount);
+      if (funded) { t.funded -= a.amount; bankOp(actor.ref, a.amount, 'cashout', 'Chips saved from a table'); }
       return { ok: true, balance: p.balance, vault: a.amount, vaultRef: actor.ref };
     }
     case 'vault_withdraw': {                         // bring saved chips back to the table (no fee, not a bank trip)
@@ -303,12 +336,14 @@ export function applyAction(t, actor, a, ctx) {
       if (!mine(p)) return deny('You can only use your own vault.');
       if (!isCents(a.amount)) return deny('Enter an amount to withdraw.');
       const m = overMax(a.amount); if (m) return deny(m);
-      if ((ctx.vault || 0) < a.amount) return deny('Not enough chips in your vault (' + fmt(ctx.vault || 0) + ').');
+      if (funded ? account < a.amount : (ctx.vault || 0) < a.amount) return deny('Not enough money in your bank account (' + fmt(funded ? account : (ctx.vault || 0)) + ').');
       p.balance += a.amount; p.vin += a.amount;
       logHand(p, 'vault_in', 0, a.amount);
+      if (funded) { t.funded += a.amount; bankOp(actor.ref, -a.amount, 'buyin', 'Chips taken to a table'); }
       return { ok: true, balance: p.balance, vault: -a.amount, vaultRef: actor.ref };
     }
     case 'undo': {
+      if (funded && !dealerPower) return deny('Only the dealer can undo a hand.');
       let idx = -1;
       if (dealerPower) idx = t.history.length - 1;
       else {
@@ -319,6 +354,12 @@ export function applyAction(t, actor, a, ctx) {
       if (idx < 0) return deny('No hands to undo.');
       const h = t.history[idx];
       if (h.outcome === 'vault_in' || h.outcome === 'vault_out') return deny('Vault moves can not be undone.');
+      if (funded) {
+        if (h.outcome === 'rebuy' || h.outcome === 'trivia') return deny('Bank moves can not be undone.');
+        const hp = find(h.pid);
+        if (!hp) return deny('That player has already left the table.');
+        if (mine(hp)) return deny('You cannot undo hands on your own seat.');
+      }
       const hand = ['win', 'loss', 'blackjack', 'push'].includes(h.outcome);
       if (rounds && hand && t.round.phase !== 'playing') {
         if (idx !== t.history.length - 1 || t.round.n < 2) return deny('That round is over, so its hands can no longer be undone.');
@@ -331,6 +372,7 @@ export function applyAction(t, actor, a, ctx) {
         p.balance -= h.delta;                       // newest entry of that seat, so the balance can't go negative
         if (h.outcome === 'rebuy') { p.added = Math.max(0, p.added - h.delta - h.wager); p.takes = Math.max(0, p.takes - 1); }
         if (h.outcome === 'trivia') { p.trivia = Math.max(0, p.trivia - h.delta); p.triviaAt = -1; }
+        if (funded) t.house += h.delta;
         if (rounds && hand) { p.hand = h.wager; p.doubled = true; }      // the hand is back in play
       }
       return { ok: true, entry: h, playerFound: !!p };
@@ -339,6 +381,8 @@ export function applyAction(t, actor, a, ctx) {
       const p = find(a.pid);
       if (!p) return deny('Player not found.');
       if (!(host || mine(p))) return deny(NOT_YOURS);
+      if (funded && p.hand > 0) return deny('Finish the hand first. Then the chips go back to the bank account.');
+      if (funded && p.owner && p.balance > 0) { t.funded -= p.balance; bankOp(p.owner, p.balance, 'cashout', 'Left a table'); }
       t.players = t.players.filter(x => x.id !== p.id);
       if (p.owner && t.dealerReq === p.owner) t.dealerReq = '';
       roundOver();
@@ -346,6 +390,11 @@ export function applyAction(t, actor, a, ctx) {
     }
     case 'reset': {
       if (!host) return deny('Only the host can reset the table.');
+      if (funded) {                                  // chips are real money: nothing is refunded, created or destroyed; only the round and recent hands restart
+        t.players.forEach(p => { p.bet = 0; p.hand = 0; p.doubled = false; p.out = false; p.last = 0; });
+        t.history = []; t.round = { n: 1, phase: 'betting' };
+        return { ok: true };
+      }
       t.players.forEach(p => { p.balance = p.start; p.added = 0; p.takes = 0; p.bet = 0; p.hand = 0; p.doubled = false; p.out = false; p.last = 0; p.trivia = 0; p.triviaAt = -1; p.vin = 0; p.vout = 0; });
       t.history = [];
       t.round = { n: 1, phase: 'betting' };
@@ -595,17 +644,17 @@ export default {
       if (body.length > 4096) return json({ error: 'too large' }, 413);
       return withCors(await stub.fetch('https://room/act', {
         method: 'POST',
-        headers: { Authorization: request.headers.get('Authorization') || '', 'X-Ref': who.ref },
+        headers: { Authorization: request.headers.get('Authorization') || '', 'X-Ref': who.ref, 'X-Code': code },
         body,
       }));
     }
-    if (request.method === 'GET') return withCors(await stub.fetch('https://room/state'));
+    if (request.method === 'GET') return withCors(await stub.fetch('https://room/state', { headers: { 'X-Code': code } }));
     if (request.method === 'PUT') {
       const body = await request.text();
       if (body.length > MAX_BODY) return json({ error: 'too large' }, 413);
       return withCors(await stub.fetch('https://room/state', {
         method: 'PUT',
-        headers: { Authorization: request.headers.get('Authorization') || '' },
+        headers: { Authorization: request.headers.get('Authorization') || '', 'X-Code': code },
         body,
       }));
     }
@@ -628,7 +677,16 @@ export class Room {
     const now = Date.now();
     const meta = await this.state.storage.get('meta');
     const expired = meta && now - meta.updated > ROOM_TTL_MS;
-    if (expired) { await this.state.storage.deleteAll(); }
+    const code = request.headers.get('X-Code') || '';
+    if (expired) {                                   // a closing table pays every seat back into its owner's bank account first
+      const old = normalizeTable(await this.state.storage.get('table'));
+      const back = old.players.filter(p => p.owner && p.balance > 0).map(p => ({ ref: p.owner, delta: p.balance, kind: 'cashout', note: 'Table closed' }));
+      if (back.length || old.house) {                // the house position leaves with the table (until the casino pot takes it over): supply follows
+        const r = await reg(this.env, '/bank/apply', { opId: 'exp:' + code + ':' + meta.updated, ops: back, supplyDelta: -old.house });
+        if (!r.ok) return json({ error: 'Try again in a moment.' }, 503);
+      }
+      await this.state.storage.deleteAll();
+    }
     const live = meta && !expired ? meta : null;
 
     if (path === '/init') {
@@ -649,15 +707,16 @@ export class Room {
       const table = normalizeTable(await this.state.storage.get('table'));
       const ref = request.headers.get('X-Ref') || '';
       const act = body && body.action;
-      let vault;                                       // savings vault balance, only fetched when an action needs it
-      if (act && (act.type === 'vault_withdraw' || (act.type === 'seat' && act.fromVault)) && ref) vault = (await (await reg(this.env, '/vault/get', { ref })).json()).balance;
-      const res = applyAction(table, { role: isHost ? 'host' : 'player', ref }, act, { vault });
+      let account;                                     // bank account balance, only fetched when an action spends from it
+      if (act && ref && ['seat', 'rebuy', 'vault_withdraw'].includes(act.type)) account = (await (await reg(this.env, '/vault/get', { ref })).json()).balance;
+      const res = applyAction(table, { role: isHost ? 'host' : 'player', ref }, act, { funded: true, account });
       if (!res.ok) return json({ ok: false, error: res.error }, 400);
       let vaultBalance;
-      if (res.vault) {                                 // the vault is updated first: if it refuses, the table is not saved
-        const vr = await reg(this.env, '/vault/add', { ref: res.vaultRef, delta: res.vault });
-        if (!vr.ok) return json({ ok: false, error: 'Not enough chips in your vault.' }, 400);
-        vaultBalance = (await vr.json()).balance;
+      if (res.ops && res.ops.length) {                 // accounts are updated first (all or nothing, once per table version): if the bank refuses, the table is not saved
+        const vr = await reg(this.env, '/bank/apply', { opId: code + ':' + (live.v + 1), ops: res.ops });
+        if (!vr.ok) return json({ ok: false, error: 'The bank could not complete that. Nothing was changed.' }, 400);
+        const bal = (await vr.json()).balances || {};
+        if (ref && typeof bal[ref] === 'number') vaultBalance = bal[ref];
       }
       const v = live.v + 1;
       await this.state.storage.put('table', table);
@@ -679,7 +738,7 @@ export class Room {
     const seed = normalizeTable(Object.assign({}, body.state, {
       settings: Object.assign({}, body.state.settings, { rounds: true }),   // online tables play in rounds
       round: undefined, dealer: '', dealerReq: '',
-      players: body.state.players.map(p => ({ id: p.id, name: p.name, start: p.start, balance: p.balance, added: p.added, takes: p.takes })), // no owners
+      players: [], history: [], house: 0, funded: 0,              // no free chips: everyone sits down with money from their own bank account
     }));
     await this.state.storage.put('table', seed);
     await this.state.storage.put('meta', { token: live.token, v: 1, updated: now });
@@ -698,6 +757,20 @@ async function ledgerAdd(s, ref, type, amount, balance, note) {
   while (l.length > LEDGER_MAX) l.shift();
   await s.put(k, l);
 }
+// The one-time $1,000 welcome grant: every way of reaching an account goes through here, so it can never be skipped or repeated.
+async function ensureGrant(s, ref) {
+  const bk = 'b:' + ref;
+  const meta = (await s.get(bk)) || {};
+  let bal = (await s.get('v:' + ref)) || 0;
+  if (!meta.granted) {
+    meta.granted = true; bal += START_GRANT;
+    await s.put(bk, meta); await s.put('v:' + ref, bal);
+    await s.put('supply', ((await s.get('supply')) || 0) + START_GRANT);
+    await ledgerAdd(s, ref, 'grant', START_GRANT, bal, 'Welcome grant');
+  }
+  return bal;
+}
+const LEDGER_KINDS = ['buyin', 'cashout', 'trivia', 'fee'];
 export class Registry {
   constructor(state) { this.state = state; }
 
@@ -787,15 +860,7 @@ export class Registry {
 
     if (path === '/bank/get') {                      // my account: one-time $1,000 grant, then balance + ledger
       if (!REF_RE.test(String(b.ref || ''))) return json({ error: 'bad request' }, 400);
-      const bk = 'b:' + b.ref;
-      const meta = (await s.get(bk)) || {};
-      let bal = (await s.get('v:' + b.ref)) || 0;
-      if (!meta.granted) {
-        meta.granted = true; bal += START_GRANT;
-        await s.put(bk, meta); await s.put('v:' + b.ref, bal);
-        await s.put('supply', ((await s.get('supply')) || 0) + START_GRANT);
-        await ledgerAdd(s, b.ref, 'grant', START_GRANT, bal, 'Welcome grant');
-      }
+      const bal = await ensureGrant(s, b.ref);
       return json({ balance: bal, granted: true, ledger: ((await s.get('l:' + b.ref)) || []).slice().reverse() });
     }
     if (path === '/bank/mint') {                     // admin only (checked by the worker): new money, always logged
@@ -808,7 +873,45 @@ export class Registry {
       return json({ ok: true, balance: bal });
     }
     if (path === '/vault/get') {
-      return json({ balance: (await s.get('v:' + b.ref)) || 0 });
+      if (!REF_RE.test(String(b.ref || '')) || !(await s.get('r:' + b.ref))) return json({ balance: 0 });
+      return json({ balance: await ensureGrant(s, b.ref) });
+    }
+    if (path === '/bank/apply') {                    // a batch of account moves from a table, all or nothing, applied once per opId
+      const ops = Array.isArray(b.ops) ? b.ops : [];
+      const opId = typeof b.opId === 'string' && b.opId.length > 0 && b.opId.length <= 80 ? b.opId : '';
+      const supplyDelta = b.supplyDelta === undefined ? 0 : b.supplyDelta;
+      if (!opId || (!ops.length && !supplyDelta) || ops.length > 200 || !Number.isInteger(supplyDelta)) return json({ error: 'bad request' }, 400);
+      const done = await s.get('o:' + opId);
+      if (done) return json({ ok: true, dup: true, balances: done.balances });
+      const exists = {}, total = {};
+      for (const o of ops) {
+        const mint = o.mint === undefined ? 0 : o.mint;
+        if (!o || !REF_RE.test(String(o.ref || '')) || !Number.isInteger(o.delta) || !Number.isInteger(mint) || mint < 0 || !LEDGER_KINDS.includes(o.kind)) return json({ error: 'bad request' }, 400);
+        if (exists[o.ref] === undefined) exists[o.ref] = !!(await s.get('r:' + o.ref));
+        if (!exists[o.ref] && o.delta < 0) return json({ error: 'no such account' }, 404);
+      }
+      const bal = {};
+      for (const o of ops) {
+        if (!exists[o.ref]) continue;
+        if (bal[o.ref] === undefined) bal[o.ref] = await ensureGrant(s, o.ref);
+        total[o.ref] = (total[o.ref] || 0) + o.delta;
+      }
+      for (const r of Object.keys(total)) if (bal[r] + total[r] < 0 || bal[r] + total[r] > MAX_CENTS) return json({ error: 'balance limit' }, 409);
+      let supply = ((await s.get('supply')) || 0) + supplyDelta;
+      for (const o of ops) {
+        if (!exists[o.ref]) { supply -= o.delta; continue; }      // the account was deleted: that money leaves circulation, it is not kept anywhere
+        bal[o.ref] += o.delta; supply += o.mint || 0;
+        await s.put('v:' + o.ref, bal[o.ref]);
+        await ledgerAdd(s, o.ref, o.kind, o.mint ? o.mint : o.delta, bal[o.ref], o.note);
+      }
+      await s.put('supply', supply);
+      await s.put('o:' + opId, { t: Date.now(), balances: bal });
+      const lastPrune = (await s.get('oprune')) || 0;
+      if (Date.now() - lastPrune > 86400000) {
+        await s.put('oprune', Date.now());
+        for (const [k, v] of (await s.list({ prefix: 'o:' })).entries()) if (v && v.t && Date.now() - v.t > 3 * 86400000) await s.delete(k);
+      }
+      return json({ ok: true, balances: bal });
     }
 
     if (path === '/vault/add') {                     // credit (+) or debit (-); never below zero
