@@ -362,6 +362,7 @@
 <div class="panel" id="vaultPanel" hidden>
   <h2>Your vault</h2>
   <div class="online-status" id="vaultInfo">Chips you save here stay yours between games.</div>
+  <div class="online-status" id="bankLedger" style="font-size:12px;line-height:1.5;white-space:pre-line"></div>
   <input type="text" id="vaultAmt" placeholder="Chips $" inputmode="decimal" autocomplete="off">
   <div class="row mt">
     <button type="button" class="btn-ghost" id="vaultSave" style="flex:1">Save to vault</button>
@@ -1416,7 +1417,7 @@ var Core = (function () {
   }
 
   /* ---------- rounds, dealer, trivia, vault helpers ---------- */
-  var vaultBal = null, triviaDeck = [], triviaBank = null;
+  var bankLedger = [], vaultBal = null, triviaDeck = [], triviaBank = null;
   function roundsOn() { return !!online.role && !!Core.state.settings.rounds; }
   function iDeal() { return online.role === 'host' ? !Core.state.dealer : (!!myRef && Core.state.dealer === myRef); }
   function seatOf(ref) { var ps = Core.state.players; for (var i = 0; i < ps.length; i++) if (ps[i].owner === ref) return ps[i]; return null; }
@@ -2393,13 +2394,17 @@ var Core = (function () {
     if (!isPlayer() || !ONLINE_URL) return;
     var now = Date.now(); if (!force && now - vaultFetched < 15000) return; vaultFetched = now;
     api('/api/vault').then(function (r) { return r.json(); }).then(function (d) {
-      if (d && typeof d.balance === 'number') { vaultBal = d.balance; renderVault(); }
+      if (d && typeof d.balance === 'number') { vaultBal = d.balance; bankLedger = Array.isArray(d.ledger) ? d.ledger : []; renderVault(); }
     }).catch(function () {});
   }
   function renderVault() {
     var pr = isPlayer(), me = pr ? mySeat() : null;
     $('vaultPanel').hidden = !(pr && vaultBal !== null);
     $('vaultInfo').textContent = 'In your vault: ' + Core.fmt(vaultBal || 0) + '. Saved chips stay yours for next game, with no fee. Withdrawing is free and does not count as a bank trip.';
+    var LT = { grant: 'Welcome grant', mint: 'Added by admin', buyin: 'To a table', cashout: 'From a table' };
+    $('bankLedger').textContent = bankLedger.slice(0, 8).map(function (e) {
+      return new Date(e.t).toLocaleDateString() + '  ' + (LT[e.type] || e.type) + '  ' + (e.amount > 0 ? '+' : '-') + Core.fmt(Math.abs(e.amount)) + '  (balance ' + Core.fmt(e.balance) + ')';
+    }).join('\n');
     $('vaultSave').hidden = !me; $('vaultTake').hidden = !me;
     var fv = $('fromVaultRow'), show = pr && !me && (vaultBal || 0) > 0;
     if (fv.style) fv.style.display = show ? 'block' : 'none'; fv.hidden = !show;

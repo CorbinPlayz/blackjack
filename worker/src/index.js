@@ -550,6 +550,10 @@ export default {
         if (!/^[^\s@<>]+@[^\s@<>]+$/.test(email) || email.length > 120) return json({ error: 'bad email' }, 400);
         return withCors(await reg(env, '/preapprove', { email }));
       }
+      if (url.pathname === '/api/admin/mint' && request.method === 'POST') {
+        const b = await readJson(request);
+        return withCors(await reg(env, '/bank/mint', { ref: String(b.ref || ''), amount: b.amount, note: String(b.note || '').slice(0, 60) }));
+      }
       const am = url.pathname.match(/^\/api\/admin\/devices\/([A-Za-z0-9]+)$/);
       if (am && request.method === 'POST') {
         const b = await readJson(request);
@@ -562,7 +566,7 @@ export default {
     if (url.pathname === '/api/vault' && request.method === 'GET') {          // my saved chips (kept between games)
       const me = await identify(request, env);
       if (!me.ok || !me.ref) return json({ error: 'not approved' }, 403);
-      return withCors(await reg(env, '/vault/get', { ref: me.ref }));
+      return withCors(await reg(env, '/bank/get', { ref: me.ref }));
     }
 
     const m = url.pathname.match(/^\/api\/rooms(?:\/([A-Za-z0-9]{4,6})(\/act)?)?$/);
@@ -685,6 +689,15 @@ export class Room {
 
 // Single instance holding every device that has asked for access.
 // status: 'pending' (asked) -> 'approved' | 'blocked'. 'remove' deletes the record.
+const START_GRANT = 100000;                      // $1,000 in cents, once per account
+const LEDGER_MAX = 100;
+async function ledgerAdd(s, ref, type, amount, balance, note) {
+  const k = 'l:' + ref;
+  const l = (await s.get(k)) || [];
+  l.push({ t: Date.now(), type, amount, balance, note: String(note || '').slice(0, 60) });
+  while (l.length > LEDGER_MAX) l.shift();
+  await s.put(k, l);
+}
 export class Registry {
   constructor(state) { this.state = state; }
 
@@ -772,6 +785,28 @@ export class Registry {
       return json({ ok: true });
     }
 
+    if (path === '/bank/get') {                      // my account: one-time $1,000 grant, then balance + ledger
+      if (!REF_RE.test(String(b.ref || ''))) return json({ error: 'bad request' }, 400);
+      const bk = 'b:' + b.ref;
+      const meta = (await s.get(bk)) || {};
+      let bal = (await s.get('v:' + b.ref)) || 0;
+      if (!meta.granted) {
+        meta.granted = true; bal += START_GRANT;
+        await s.put(bk, meta); await s.put('v:' + b.ref, bal);
+        await s.put('supply', ((await s.get('supply')) || 0) + START_GRANT);
+        await ledgerAdd(s, b.ref, 'grant', START_GRANT, bal, 'Welcome grant');
+      }
+      return json({ balance: bal, granted: true, ledger: ((await s.get('l:' + b.ref)) || []).slice().reverse() });
+    }
+    if (path === '/bank/mint') {                     // admin only (checked by the worker): new money, always logged
+      if (!REF_RE.test(String(b.ref || '')) || !Number.isInteger(b.amount) || b.amount <= 0 || b.amount > 100000000) return json({ error: 'bad request' }, 400);
+      if (!(await s.get('r:' + b.ref))) return json({ error: 'not found' }, 404);
+      const bal = ((await s.get('v:' + b.ref)) || 0) + b.amount;
+      await s.put('v:' + b.ref, bal);
+      await s.put('supply', ((await s.get('supply')) || 0) + b.amount);
+      await ledgerAdd(s, b.ref, 'mint', b.amount, bal, b.note || 'Admin mint');
+      return json({ ok: true, balance: bal });
+    }
     if (path === '/vault/get') {
       return json({ balance: (await s.get('v:' + b.ref)) || 0 });
     }
@@ -781,6 +816,7 @@ export class Registry {
       const next = ((await s.get('v:' + b.ref)) || 0) + b.delta;
       if (next < 0 || next > MAX_CENTS) return json({ error: 'vault limit' }, 409);
       await s.put('v:' + b.ref, next);
+      if (b.delta) await ledgerAdd(s, b.ref, b.delta > 0 ? 'cashout' : 'buyin', b.delta, next, b.delta > 0 ? 'Chips saved from a table' : 'Chips taken to a table');
       return json({ balance: next });
     }
 

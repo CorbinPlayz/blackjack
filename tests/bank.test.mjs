@@ -1,0 +1,23 @@
+// Bank step 1: $1,000 one-time grant, ledger, admin mint, supply, vault moves. Needs ./w.mjs (copy of worker/src/index.js).
+import {Registry as R} from './w.mjs';
+import assert from 'node:assert';
+let n=0;const ok=(x,m)=>{assert.ok(x,m);n++;console.log('PASS',m)};
+const store=new Map(); const st={storage:{get:async k=>store.get(k),put:async(k,v)=>void store.set(k,v),delete:async k=>void store.delete(k),list:async({prefix})=>new Map([...store].filter(([k])=>k.startsWith(prefix)))}};
+const reg=new R(st); const call=async(path,body)=>{const r=await reg.fetch(new Request('https://x'+path,{method:'POST',body:JSON.stringify(body)}));return Object.assign(await r.json(),{_s:r.status})};
+await call('/preapprove',{email:'a@x.com'}); await call('/preapprove',{email:'b@x.com'});
+const A=(await call('/google',{deviceId:'a'.repeat(32),email:'a@x.com',name:'A'})).ref, B=(await call('/google',{deviceId:'b'.repeat(32),email:'b@x.com',name:'B'})).ref;
+let g=await call('/bank/get',{ref:A}); ok(g.balance===100000&&g.ledger.length===1&&g.ledger[0].type==='grant','first visit grants $1,000 and logs it');
+g=await call('/bank/get',{ref:A}); ok(g.balance===100000&&g.ledger.length===1,'grant is only ever given once (no infinite money by refreshing)');
+await call('/bank/get',{ref:B});
+ok(store.get('supply')===200000,'supply counts every cent created');
+let v=await call('/vault/add',{ref:A,delta:-30000}); ok(v.balance===70000,'buy-in debits the account');
+ok((await call('/vault/add',{ref:A,delta:-80000}))._s===409,'cannot spend more than the account holds');
+await call('/vault/add',{ref:A,delta:25000}); g=await call('/bank/get',{ref:A});
+ok(g.balance===95000&&g.ledger[0].type==='cashout'&&g.ledger[1].type==='buyin','cash-out credited and ledger is newest-first');
+ok((await call('/bank/mint',{ref:A,amount:-5}))._s===400&&(await call('/bank/mint',{ref:A,amount:1.5}))._s===400,'mint rejects bad amounts');
+ok((await call('/bank/mint',{ref:'zzzzzzzz',amount:100}))._s===404,'mint needs a real account');
+await call('/bank/mint',{ref:B,amount:5000,note:'prize'}); g=await call('/bank/get',{ref:B});
+ok(g.balance===105000&&g.ledger[0].type==='mint'&&g.ledger[0].note==='prize'&&store.get('supply')===205000,'admin mint raises balance and supply and is logged');
+for(let i=0;i<130;i++) await call('/vault/add',{ref:B,delta:i%2?1:-1});
+ok((await call('/bank/get',{ref:B})).ledger.length===100,'ledger keeps the latest 100 entries');
+console.log('ALL',n,'BANK CHECKS PASSED');
