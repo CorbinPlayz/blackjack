@@ -27,11 +27,13 @@ const act = async (code, who, action) => {          // who: 'H' = host, or an ac
   return Object.assign(await res.json(), { _s: res.status });
 };
 const table = code => room(code).st.m.get('table');
+const humanDealer = async code => { const r = await act(code, 'H', { type: 'settings', auto: false }); assert.ok(r.ok, 'switch to human dealer: ' + r.error); };
 const supply = () => regSt.m.get('supply') || 0;
 const accounts = () => { let s = 0; for (const [k, v] of regSt.m) if (k.startsWith('v:')) s += v; return s; };
 const onTables = () => { let s = 0; for (const c of Object.keys(rooms)) { const t = room(c).st.m.get('table'); if (t) s += t.players.reduce((a, p) => a + p.balance, 0) + (t.house || 0); } return s; };
 const conserved = () => accounts() + onTables() === supply();
 
+await humanDealer('TBL01');
 ok((await bal('A')) === 100000 && (await bal('B')) === 100000 && (await bal('C')) === 100000 && supply() === 300000, 'every account is granted $1,000 once, even before it opens the bank page');
 ok(conserved(), 'invariant: accounts + chips on tables + house == total created');
 
@@ -118,13 +120,14 @@ r = await room('TBL01').obj.fetch(new Request('https://room/state', { headers: {
 ok(r.status === 404 && accounts() === before - table0house && conserved() && !room('TBL01').st.m.has('table'), 'an expired table pays every seat back before it is wiped');
 
 // seeding a table from a local game gives no chips
-const T2 = mk('TBL02'); await T2.obj.fetch(new Request('https://room/init', { method: 'POST', body: JSON.stringify({ token: T2.tok }) }));
+const T2 = mk('TBL02'); await T2.obj.fetch(new Request('https://room/init', { method: 'POST', body: JSON.stringify({ token: T2.tok }) })); 
 r = await T2.obj.fetch(new Request('https://room/state', { method: 'PUT', headers: { Authorization: 'Bearer ' + T2.tok, 'X-Code': 'TBL02' }, body: JSON.stringify({ state: { players: [{ id: 1, name: 'Free', start: 99999999, balance: 99999999 }], history: [] } }) }));
 ok(r.status === 200 && table('TBL02').players.length === 0, 'starting an online table from a local game imports no free chips');
+await humanDealer('TBL02');
 
 // ---- randomized: nothing anyone does can break the invariant ----
 let seed = 987654321; const rnd = () => (seed = (seed * 1664525 + 1013904223) >>> 0) / 4294967296; const ri = (a, b) => a + Math.floor(rnd() * (b - a + 1));
-const codes = ['TBL02', 'TBL03']; mk('TBL03'); await room('TBL03').obj.fetch(new Request('https://room/init', { method: 'POST', body: JSON.stringify({ token: room('TBL03').tok }) }));
+const codes = ['TBL02', 'TBL03']; mk('TBL03'); await room('TBL03').obj.fetch(new Request('https://room/init', { method: 'POST', body: JSON.stringify({ token: room('TBL03').tok }) })); await humanDealer('TBL03');
 let accepted = 0, total = 0;
 for (let i = 0; i < 6000; i++) {
   const code = codes[ri(0, 1)], who = ['H', 'A', 'B', 'C'][ri(0, 3)], t = table(code), pid = t.players.length ? t.players[ri(0, t.players.length - 1)].id : 1;

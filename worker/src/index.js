@@ -41,6 +41,179 @@ export function validState(s) {
   return playersOk && historyOk;
 }
 
+/* ================= ONLINE DEALER =================
+   The server deals: a 6-deck shoe (crypto shuffle), dealer stands on every 17, blackjack pays 3:2, split once, double on two cards,
+   insurance pays 2:1. The shoe and the hole card live under the separate storage key 'secret', so they can never be sent to a client.
+   Cards are 0..51 (rank = c % 13: 0 = ace, 1..8 = 2..9, 9..12 = 10/J/Q/K). Time moves lazily: advance() is called on every request. */
+const BET_MS = 20000, MIN_BET_MS = 6000, FIRST_BET_MS = 8000, ACT_MS = 15000, INS_MS = 10000, RESULT_MS = 7000, IDLE_LIMIT = 2;
+export const cardValue = c => { const r = c % 13; return r === 0 ? 11 : r >= 9 ? 10 : r + 1; };
+export function handTotal(cards) {
+  let total = 0, aces = 0;
+  for (const c of cards) { const v = cardValue(c); total += v; if (v === 11) aces++; }
+  while (total > 21 && aces) { total -= 10; aces--; }
+  return { total, soft: aces > 0 };
+}
+export const isBlackjack = cards => cards.length === 2 && handTotal(cards).total === 21;
+export function randInt(n) {                         // unbiased random integer in [0, n)
+  const lim = Math.floor(4294967296 / n) * n, b = new Uint32Array(1);
+  do { crypto.getRandomValues(b); } while (b[0] >= lim);
+  return b[0] % n;
+}
+export function newShoe(rand) {
+  rand = rand || randInt;
+  const s = [];
+  for (let d = 0; d < 6; d++) for (let c = 0; c < 52; c++) s.push(c);
+  for (let i = s.length - 1; i > 0; i--) { const j = rand(i + 1); const x = s[i]; s[i] = s[j]; s[j] = x; }
+  return s;
+}
+export function normalizeSecret(x) {
+  x = x && typeof x === 'object' ? x : {};
+  const ok = c => Number.isInteger(c) && c >= 0 && c < 52;
+  return { shoe: (Array.isArray(x.shoe) ? x.shoe : []).filter(ok), hole: ok(x.hole) ? x.hole : -1 };
+}
+function histPush(t, p, outcome, wager, delta) {
+  t.history.push({ id: t.nextHid++, pid: p.id, name: p.name, outcome, wager, delta });
+  if (t.history.length > HISTORY_MAX) t.history.shift();
+}
+
+export function advance(t, secret, now, rand) {
+  if (!t.settings.auto) return false;
+  const D = t.deal;
+  let changed = false;
+  const draw = () => { if (!secret.shoe.length) secret.shoe = newShoe(rand); return secret.shoe.pop(); };
+  const eligible = () => t.players.filter(p => !p.out && p.balance > 0);
+
+  const afterInsurance = () => {                     // the dealer peeks for blackjack, then the players act
+    const dbj = isBlackjack([D.cards[0], secret.hole]);
+    t.players.forEach(p => {
+      p.hands.forEach(h => { h.bj = isBlackjack(h.cards); h.done = dbj || h.bj; });
+      p.until = p.hands.some(h => !h.done) ? now + ACT_MS : 0;
+    });
+    D.phase = 'acting';
+  };
+  const deal = bettors => {
+    if (secret.shoe.length < 78) secret.shoe = newShoe(rand);
+    D.cards = []; D.dealerBJ = false;
+    t.players.forEach(p => { p.hands = []; p.ins = 0; p.insDone = true; p.until = 0; if (!bettors.includes(p)) p.bet = 0; });
+    bettors.forEach(p => { p.hands = [{ cards: [draw()], bet: p.bet, doubled: false, done: false, bj: false, res: '', net: 0 }]; p.hand = p.bet; p.last = p.bet; p.bet = 0; });
+    D.cards.push(draw());
+    bettors.forEach(p => p.hands[0].cards.push(draw()));
+    secret.hole = draw(); D.hole = true;
+    if (cardValue(D.cards[0]) === 11) {              // an ace shows: offer insurance
+      bettors.forEach(p => { const side = Math.floor(p.hands[0].bet / 2); p.insDone = !(side > 0 && p.balance - p.hand >= side); });
+      D.phase = 'insurance'; D.deadline = now + INS_MS;
+    } else afterInsurance();
+  };
+  const settle = () => {
+    const dt = handTotal(D.cards).total, dbj = isBlackjack(D.cards), dbust = dt > 21;
+    D.dealerBJ = dbj;
+    t.players.forEach(p => {
+      if (!p.hands.length) return;
+      p.hands.forEach(h => {
+        const pt = handTotal(h.cards).total;
+        let res;
+        if (pt > 21) res = 'bust';
+        else if (h.bj) res = dbj ? 'push' : 'blackjack';
+        else if (dbj) res = 'loss';
+        else if (dbust || pt > dt) res = 'win';
+        else if (pt === dt) res = 'push';
+        else res = 'loss';
+        const n = res === 'win' ? h.bet : res === 'blackjack' ? Math.round(h.bet * 3 / 2) : res === 'push' ? 0 : -h.bet;
+        h.res = res; h.net = n;
+        p.balance += n; t.house -= n;
+        histPush(t, p, res === 'bust' ? 'loss' : res, h.bet, n);
+      });
+      if (p.ins > 0) {
+        const n = dbj ? p.ins * 2 : -p.ins;
+        p.balance += n; t.house -= n;
+        histPush(t, p, dbj ? 'insurance_win' : 'insurance_loss', p.ins, n);
+      }
+      p.hand = 0; p.until = 0;
+      if (p.bet > p.balance) p.bet = p.balance;
+    });
+    D.phase = 'results'; D.deadline = now + RESULT_MS;
+  };
+  const dealerPlay = () => {
+    D.cards.push(secret.hole); secret.hole = -1; D.hole = false;
+    const needed = t.players.some(p => p.hands.some(h => handTotal(h.cards).total <= 21 && !h.bj));
+    if (needed) while (handTotal(D.cards).total < 17) D.cards.push(draw());
+    settle();
+  };
+
+  for (let guard = 0; guard < 12; guard++) {
+    let moved = false;
+    if (D.phase === 'betting') {
+      if (!D.startedAt) {
+        D.startedAt = now; D.deadline = now + BET_MS; moved = true;
+        if (t.settings.autoBet) t.players.forEach(p => { if (!p.out && p.last > 0 && p.balance > 0 && !(p.bet > 0)) p.bet = Math.min(p.last, p.balance); });
+      } else {
+        const el = eligible(), bet = el.filter(p => p.bet > 0 && p.bet <= p.balance);
+        if (bet.length && ((bet.length === el.length && now >= D.startedAt + MIN_BET_MS) || now >= D.deadline)) { deal(bet); moved = true; }
+      }
+    } else if (D.phase === 'insurance') {
+      const waiting = t.players.filter(p => p.hands.length && !p.insDone);
+      if (!waiting.length || now >= D.deadline) { waiting.forEach(p => { p.insDone = true; }); afterInsurance(); moved = true; }
+    } else if (D.phase === 'acting') {
+      t.players.forEach(p => {
+        if (p.hands.some(h => !h.done) && p.until && now >= p.until) { p.hands.forEach(h => { h.done = true; }); p.idle += 1; p.until = 0; moved = true; }   // too slow: stand
+      });
+      if (!t.players.some(p => p.hands.some(h => !h.done))) { dealerPlay(); moved = true; }
+    } else if (D.phase === 'results' && now >= D.deadline) {
+      t.players.forEach(p => { p.hands = []; p.ins = 0; p.insDone = false; if (p.idle >= IDLE_LIMIT) { p.out = true; p.idle = 0; p.bet = 0; } });   // asleep for two rounds: sit out
+      D.cards = []; D.hole = false; D.dealerBJ = false; D.phase = 'betting'; D.startedAt = 0; D.deadline = 0; t.round.n += 1; moved = true;
+    }
+    if (!moved) break;
+    changed = true;
+  }
+  D.shoeLeft = secret.shoe.length;
+  return changed;
+}
+
+// A player's own decision. p must be the acting player's seat; returns { ok } or { ok:false, error }.
+function playerAct(t, secret, p, a, now, rand) {
+  const D = t.deal, no = error => ({ ok: false, error });
+  const draw = () => { if (!secret.shoe.length) secret.shoe = newShoe(rand); return secret.shoe.pop(); };
+  if (a.type === 'insure') {
+    if (D.phase !== 'insurance') return no('Insurance is not being offered right now.');
+    if (!p.hands.length) return no('You are not in this round.');
+    if (p.insDone) return no('You already answered.');
+    if (a.take === true) {
+      const side = Math.floor(p.hands[0].bet / 2);
+      if (!(side > 0) || p.balance - p.hand < side) return no('Not enough chips to insure.');
+      p.ins = side; p.hand += side;
+    }
+    p.insDone = true; p.idle = 0;
+    return { ok: true };
+  }
+  if (D.phase !== 'acting') return no('Wait for the dealer.');
+  const h = p.hands.find(x => !x.done);
+  if (!h) return no('You have no hand to play.');
+  const bust = () => { if (handTotal(h.cards).total > 21) h.res = 'bust'; };
+  if (a.type === 'hit') {
+    h.cards.push(draw());
+    if (handTotal(h.cards).total >= 21) h.done = true;
+    bust();
+  } else if (a.type === 'stand') {
+    h.done = true;
+  } else if (a.type === 'double') {
+    if (h.cards.length !== 2 || h.doubled) return no('You can only double on your first two cards.');
+    if (p.balance - p.hand < h.bet) return no('Not enough chips to double (' + fmt(h.bet) + ' more needed).');
+    p.hand += h.bet; h.bet *= 2; h.doubled = true;
+    h.cards.push(draw()); h.done = true; bust();
+  } else if (a.type === 'split') {
+    if (p.hands.length !== 1 || h.cards.length !== 2 || cardValue(h.cards[0]) !== cardValue(h.cards[1])) return no('You can only split a pair, once.');
+    if (p.balance - p.hand < h.bet) return no('Not enough chips to split (' + fmt(h.bet) + ' more needed).');
+    p.hand += h.bet;
+    const second = h.cards.pop(), aces = cardValue(second) === 11;
+    h.cards.push(draw());
+    const h2 = { cards: [second, draw()], bet: h.bet, doubled: false, done: false, bj: false, res: '', net: 0 };
+    p.hands.push(h2);
+    [h, h2].forEach(x => { if (aces || handTotal(x.cards).total === 21) x.done = true; });   // split aces get one card each
+  } else return no('Unknown action.');
+  p.idle = 0; p.until = p.hands.some(x => !x.done) ? now + ACT_MS : 0;
+  return { ok: true };
+}
+
 /* ================= TABLE RULES =================
    The server is the referee. Everyone (host and players) sends "actions"; this function decides.
    Every player bets alone against the dealer: an action only ever changes the seat it names.
@@ -57,8 +230,9 @@ function fmt(cents) {
 }
 
 const nn = n => Number.isInteger(n) && n > 0 ? n : 0;
+const isCard = c => Number.isInteger(c) && c >= 0 && c < 52;
 const newPlayer = (id, name, start, owner) => {
-  const p = { id, name, start, balance: start, added: 0, takes: 0, bet: 0, hand: 0, doubled: false, out: false, last: 0, trivia: 0, triviaAt: -1, vin: 0, vout: 0 };
+  const p = { id, name, start, balance: start, added: 0, takes: 0, bet: 0, hand: 0, doubled: false, out: false, last: 0, trivia: 0, triviaAt: -1, vin: 0, vout: 0, hands: [], ins: 0, insDone: false, until: 0, idle: 0 };
   if (owner) p.owner = owner;
   return p;
 };
@@ -71,7 +245,11 @@ export function normalizeTable(t) {
       takes: nn(p.takes),                                    // how many times they went to the bank
       bet: nn(p.bet), hand: nn(p.hand), doubled: p.doubled === true, out: p.out === true, last: nn(p.last),   // round play: next wager, wager in play, sitting out, last round's wager (for auto-repeat)
       trivia: nn(p.trivia), triviaAt: Number.isInteger(p.triviaAt) ? p.triviaAt : -1,        // trivia winnings so far, and the match they last answered in
-      vin: nn(p.vin), vout: nn(p.vout) };                    // chips moved in from / out to the savings vault
+      vin: nn(p.vin), vout: nn(p.vout),                      // chips moved in from / out to the savings vault
+      hands: (Array.isArray(p.hands) ? p.hands : []).slice(0, 2).map(h => ({     // online dealer: this seat's cards (public: everyone sees them)
+        cards: (Array.isArray(h && h.cards) ? h.cards : []).filter(isCard).slice(0, 12), bet: nn(h && h.bet), doubled: !!h && h.doubled === true,
+        done: !!h && h.done === true, bj: !!h && h.bj === true, res: h && typeof h.res === 'string' ? h.res.slice(0, 12) : '', net: h && Number.isInteger(h.net) ? h.net : 0 })),
+      ins: nn(p.ins), insDone: p.insDone === true, until: nn(p.until), idle: nn(p.idle) };
     if (typeof p.owner === 'string' && p.owner) q.owner = p.owner;
     return q;
   });
@@ -81,12 +259,15 @@ export function normalizeTable(t) {
   const maxHid = history.reduce((m, h) => Math.max(m, h.id), 0);
   const st = t.settings && typeof t.settings === 'object' ? t.settings : {};
   const rd = t.round && typeof t.round === 'object' ? t.round : {};
+  const dl = t.deal && typeof t.deal === 'object' ? t.deal : {};
   return {
     players, history,
     house: Number.isInteger(t.house) ? t.house : 0,       // chips the table's house holds (fees, player losses); negative = the house owes (until the casino pot exists)
     funded: Number.isInteger(t.funded) ? t.funded : 0,   // money that came in from bank accounts (net): chips on seats + house always add up to this
     nextId: Math.max(typeof t.nextId === 'number' ? t.nextId : 1, maxId + 1),
     nextHid: Math.max(typeof t.nextHid === 'number' ? t.nextHid : 1, maxHid + 1),
+    deal: { phase: ['betting', 'insurance', 'acting', 'results'].includes(dl.phase) ? dl.phase : 'betting', startedAt: nn(dl.startedAt), deadline: nn(dl.deadline),
+      cards: (Array.isArray(dl.cards) ? dl.cards : []).filter(isCard).slice(0, 12), hole: dl.hole === true, shoeLeft: nn(dl.shoeLeft), dealerBJ: dl.dealerBJ === true },   // the dealer's PUBLIC cards (the hole card is not here)
     round: { n: Number.isInteger(rd.n) && rd.n > 0 ? rd.n : 1, phase: rd.phase === 'playing' ? 'playing' : 'betting' },
     dealer: typeof t.dealer === 'string' && REF_RE.test(t.dealer) ? t.dealer : '',          // '' = the host deals
     dealerReq: typeof t.dealerReq === 'string' && REF_RE.test(t.dealerReq) ? t.dealerReq : '',
@@ -95,6 +276,7 @@ export function normalizeTable(t) {
       bankLimit: Number.isInteger(st.bankLimit) && st.bankLimit >= 0 && st.bankLimit <= 20 ? st.bankLimit : 3,   // max bank trips per player (0 = no limit)
       triviaPct: Number.isInteger(st.triviaPct) && st.triviaPct >= 0 && st.triviaPct <= 20 ? st.triviaPct : 10, // trivia can pay up to this % of each player's buy-in
       rounds: st.rounds === false ? false : true,
+      auto: st.auto === true,                                // the server deals (online dealer table)
       autoBet: st.autoBet === false ? false : true },        // repeat each player's last wager for the next round (they can still change it)          // rounds: wagers -> dealer Start -> hands -> next round
   };
 }
@@ -123,9 +305,25 @@ function applyCore(t, actor, a, ctx, ops) {
   const may = p => dealerPower || mine(p);              // players may only touch their own seat
   const dealerSeat = p => !!t.dealer && p.owner === t.dealer;
   const rounds = t.settings.rounds;
+  const auto = t.settings.auto === true;
+  const now = Number.isInteger(ctx.now) ? ctx.now : Date.now();
+  if (auto && !ctx.secret) ctx.secret = normalizeSecret(null);
   const NOT_YOURS = 'You can only change your own chips.';
   if (!a || typeof a !== 'object') return deny('Unknown action.');
   if (!dealerPower && t.settings.locked) return deny('The host has paused the table.');
+  if (auto) {
+    advance(t, ctx.secret, now, ctx.rand);
+    if (['start', 'finish', 'settle', 'insurance', 'undo', 'add', 'dealer_request', 'dealer_cancel', 'dealer_reject', 'dealer_accept', 'dealer_set'].includes(a.type)) return deny('The online dealer runs this table.');
+    if (['hit', 'stand', 'double', 'split', 'insure'].includes(a.type)) {
+      const p = find(a.pid);
+      if (!p) return deny('Player not found.');
+      if (!mine(p)) return deny('Only you can play your own hand.');
+      const r = playerAct(t, ctx.secret, p, a, now, ctx.rand);
+      if (!r.ok) return deny(r.error);
+      advance(t, ctx.secret, now, ctx.rand);
+      return { ok: true };
+    }
+  } else if (['hit', 'stand', 'split', 'insure'].includes(a.type)) return deny('This is not an online dealer table.');
   const logHand = (p, outcome, wager, delta) => {
     t.history.push({ id: t.nextHid++, pid: p.id, name: p.name, outcome, wager, delta });
     if (t.history.length > HISTORY_MAX) t.history.shift();
@@ -176,12 +374,20 @@ function applyCore(t, actor, a, ctx, ops) {
       const p = find(a.pid);
       if (!p) return deny('Player not found.');
       if (!may(p)) return deny(NOT_YOURS);
+      if (auto && !mine(p)) return deny(NOT_YOURS);
+      if (auto && t.deal.phase !== 'betting') return deny('Bets are closed. Wait for the next round.');
       if (dealerSeat(p)) return deny('The dealer does not bet.');
       if (p.out) return deny('Sit back in before wagering.');
       if (p.hand > 0) return deny('Your hand is in play. Wager for the next round after it ends.');
       if (!Number.isInteger(a.amount) || a.amount < 0) return deny('Wager must be more than $0.');
       if (a.amount > p.balance) return deny('Wager is more than balance (' + fmt(p.balance) + ').');
+      const others = t.players.some(q => q !== p && q.bet > 0);
       p.bet = a.amount;
+      if (auto) {
+        p.idle = 0;
+        if (!others && a.amount > 0) t.deal.deadline = Math.max(t.deal.deadline, now + FIRST_BET_MS);   // the first bettor of a round gives the others a moment
+        advance(t, ctx.secret, now, ctx.rand);
+      }
       return { ok: true, bet: p.bet };
     }
     case 'start': {                                  // dealer starts the round once every wager is in
@@ -229,10 +435,11 @@ function applyCore(t, actor, a, ctx, ops) {
       const p = find(a.pid);
       if (!p) return deny('Player not found.');
       if (!may(p)) return deny(NOT_YOURS);
+      if (auto && !mine(p)) return deny(NOT_YOURS);
       if (p.hand > 0) return deny('Your hand is in play.');
-      p.out = a.out === true;
+      p.out = a.out === true; p.idle = 0;
       if (p.out) p.bet = 0;
-      else if (t.round.phase === 'betting' && !(p.bet > 0) && !dealerSeat(p) && t.settings.autoBet && p.last > 0 && p.balance > 0) p.bet = Math.min(p.last, p.balance);
+      else if (!auto && t.round.phase === 'betting' && !(p.bet > 0) && !dealerSeat(p) && t.settings.autoBet && p.last > 0 && p.balance > 0) p.bet = Math.min(p.last, p.balance);
       return { ok: true };
     }
     case 'settle': {
@@ -381,7 +588,7 @@ function applyCore(t, actor, a, ctx, ops) {
       const p = find(a.pid);
       if (!p) return deny('Player not found.');
       if (!(host || mine(p))) return deny(NOT_YOURS);
-      if (funded && p.hand > 0) return deny('Finish the hand first. Then the chips go back to the bank account.');
+      if ((funded || auto) && p.hand > 0) return deny('Finish the hand first. Then the chips go back to the bank account.');
       if (funded && p.owner && p.balance > 0) { t.funded -= p.balance; bankOp(p.owner, p.balance, 'cashout', 'Left a table'); }
       t.players = t.players.filter(x => x.id !== p.id);
       if (p.owner && t.dealerReq === p.owner) t.dealerReq = '';
@@ -390,9 +597,10 @@ function applyCore(t, actor, a, ctx, ops) {
     }
     case 'reset': {
       if (!host) return deny('Only the host can reset the table.');
+      if (auto && t.deal.phase !== 'betting') return deny('Wait until the round is over.');
       if (funded) {                                  // chips are real money: nothing is refunded, created or destroyed; only the round and recent hands restart
-        t.players.forEach(p => { p.bet = 0; p.hand = 0; p.doubled = false; p.out = false; p.last = 0; });
-        t.history = []; t.round = { n: 1, phase: 'betting' };
+        t.players.forEach(p => { p.bet = 0; p.hand = 0; p.doubled = false; p.out = false; p.last = 0; p.hands = []; p.ins = 0; p.idle = 0; });
+        t.history = []; t.round = { n: 1, phase: 'betting' }; if (auto) t.deal.startedAt = 0;
         return { ok: true };
       }
       t.players.forEach(p => { p.balance = p.start; p.added = 0; p.takes = 0; p.bet = 0; p.hand = 0; p.doubled = false; p.out = false; p.last = 0; p.trivia = 0; p.triviaAt = -1; p.vin = 0; p.vout = 0; });
@@ -461,8 +669,19 @@ function applyCore(t, actor, a, ctx, ops) {
         if (typeof a.autoBet !== 'boolean') return deny('Bad setting.');
         t.settings.autoBet = a.autoBet;
       }
+      if (a.auto !== undefined) {
+        if (typeof a.auto !== 'boolean') return deny('Bad setting.');
+        if (a.auto !== auto) {
+          if (handsInPlay() || (auto && t.deal.phase !== 'betting')) return deny('Wait until the round is over.');
+          t.settings.auto = a.auto;
+          if (a.auto) { t.settings.rounds = true; t.dealer = ''; t.dealerReq = ''; t.round.phase = 'betting'; }
+          t.deal = normalizeTable({}).deal;
+          t.players.forEach(p => { p.bet = 0; p.hands = []; p.ins = 0; p.idle = 0; });
+        }
+      }
       if (a.rounds !== undefined) {
         if (typeof a.rounds !== 'boolean') return deny('Bad setting.');
+        if (auto && a.rounds === false) return deny('The online dealer always plays in rounds.');
         t.settings.rounds = a.rounds;
         if (!a.rounds) { t.players.forEach(p => { p.hand = 0; p.bet = 0; p.doubled = false; }); t.round.phase = 'betting'; t.dealerReq = ''; }
       }
@@ -670,9 +889,15 @@ function withCors(res) {
 }
 
 export class Room {
-  constructor(state, env) { this.state = state; this.env = env; }
+  constructor(state, env) { this.state = state; this.env = env; this.q = Promise.resolve(); }
 
-  async fetch(request) {
+  fetch(request) {                                   // one request at a time: the dealer's clock and the players' actions must never interleave
+    const run = this.q.then(() => this.handle(request));
+    this.q = run.catch(() => {});
+    return run;
+  }
+
+  async handle(request) {
     const path = new URL(request.url).pathname;
     const now = Date.now();
     const meta = await this.state.storage.get('meta');
@@ -693,7 +918,7 @@ export class Room {
       if (live) return json({ error: 'taken' }, 409);
       const { token } = await request.json();
       await this.state.storage.put('meta', { token, v: 0, updated: now });
-      await this.state.storage.put('table', { players: [], history: [] });
+      await this.state.storage.put('table', { players: [], history: [], settings: { auto: true, rounds: true } });   // new tables are online dealer tables
       return json({ ok: true });
     }
 
@@ -705,11 +930,12 @@ export class Room {
       let body;
       try { body = JSON.parse(await request.text()); } catch (e) { return json({ ok: false, error: 'Bad request.' }, 400); }
       const table = normalizeTable(await this.state.storage.get('table'));
+      const secret = normalizeSecret(await this.state.storage.get('secret'));
       const ref = request.headers.get('X-Ref') || '';
       const act = body && body.action;
       let account;                                     // bank account balance, only fetched when an action spends from it
       if (act && ref && ['seat', 'rebuy', 'vault_withdraw'].includes(act.type)) account = (await (await reg(this.env, '/vault/get', { ref })).json()).balance;
-      const res = applyAction(table, { role: isHost ? 'host' : 'player', ref }, act, { funded: true, account });
+      const res = applyAction(table, { role: isHost ? 'host' : 'player', ref }, act, { funded: true, account, secret, now });
       if (!res.ok) return json({ ok: false, error: res.error }, 400);
       let vaultBalance;
       if (res.ops && res.ops.length) {                 // accounts are updated first (all or nothing, once per table version): if the bank refuses, the table is not saved
@@ -720,13 +946,21 @@ export class Room {
       }
       const v = live.v + 1;
       await this.state.storage.put('table', table);
+      await this.state.storage.put('secret', secret);
       await this.state.storage.put('meta', { token: live.token, v, updated: now });
-      return json({ ok: true, v, state: table, delta: res.delta, balance: res.balance, entry: res.entry, playerFound: res.playerFound, fee: res.fee, hand: res.hand, n: res.n, skipped: res.skipped, vaultBalance });
+      return json({ ok: true, v, t: now, state: table, delta: res.delta, balance: res.balance, entry: res.entry, playerFound: res.playerFound, fee: res.fee, hand: res.hand, n: res.n, skipped: res.skipped, vaultBalance });
     }
 
     if (request.method === 'GET') {
       const table = normalizeTable(await this.state.storage.get('table'));
-      return json({ v: live.v, state: table });
+      if (!table.settings.auto) return json({ v: live.v, state: table, t: now });
+      const secret = normalizeSecret(await this.state.storage.get('secret'));
+      if (!advance(table, secret, now)) return json({ v: live.v, state: table, t: now });      // the online dealer's clock moved on: save it (without keeping an idle table alive)
+      const v = live.v + 1;
+      await this.state.storage.put('table', table);
+      await this.state.storage.put('secret', secret);
+      await this.state.storage.put('meta', { token: live.token, v, updated: live.updated });
+      return json({ v, state: table, t: now });
     }
 
     // PUT: host only, and only once, to start the table from the host's local game
@@ -736,7 +970,7 @@ export class Room {
     if (!body || !validState(body.state)) return json({ error: 'bad state' }, 400);
     if (live.v !== 0) return json({ error: 'This table has already started.' }, 409);
     const seed = normalizeTable(Object.assign({}, body.state, {
-      settings: Object.assign({}, body.state.settings, { rounds: true }),   // online tables play in rounds
+      settings: Object.assign({}, body.state.settings, { rounds: true, auto: true }),   // online tables play in rounds, dealt by the server
       round: undefined, dealer: '', dealerReq: '',
       players: [], history: [], house: 0, funded: 0,              // no free chips: everyone sits down with money from their own bank account
     }));
