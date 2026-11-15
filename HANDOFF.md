@@ -17,12 +17,22 @@ Worker (with autoBet, start-anyway, finish, undo-reopens-round, in-page confirm 
 
 ## Google required + Google admins (deployed 2026-11-14)
 - Admin = holder of the `ADMIN_KEY` secret OR a signed-in Google account whose email is in the `ADMIN_EMAILS` Worker secret (comma-separated, case-insensitive, never put emails in the repo). Admin emails are auto-approved on sign-in, and the client shows the Admin tab without a key (`isAdminAcct`, `adminHdr()`).
-- To make someone admin: the user sends the Google email; set `ADMIN_EMAILS` via Cloudflare API (PUT script secret `secret_text`) with the full comma list. STILL PENDING: user has not yet sent the email(s).
+- To make someone admin: the user sends the Google email; set `ADMIN_EMAILS` via Cloudflare API (PUT script secret `secret_text`) with the full comma list. DONE 2026-11-14: `ADMIN_EMAILS` secret is set to the owner's Google account (c6140259@gmail.com). To add more admins, PUT `/accounts/{id}/workers/scripts/blackjack-table/secrets` body `{name:'ADMIN_EMAILS', text:'a@x.com,b@y.com', type:'secret_text'}` with the FULL list (it replaces the old value). Secrets survive code deploys because of `keep_bindings:['secret_text']`.
 - The owner's own device can still be approved with the key (`/api/admin/self`, `owner:true`).
 - Tests: `tests/admin.test.mjs` (13), `tests/google.test.mjs` (17). `tests/test2.js` is LEGACY (tests the retired name flow) and fails by design.
 - Keep this file updated with EVERY change (user request).
 
+## State of the world (2026-11-14, end of session 1)
+- Repo: https://github.com/CorbinPlayz/blackjack, branch `main`, latest commit "Require Google sign-in; Google admins via ADMIN_EMAILS secret; update handoff". Worker deployed = repo code (verified bindings ADMIN_EMAILS, ADMIN_KEY, REGISTRY, ROOM). Nothing is uncommitted.
+- The sandbox shell cannot reach the worker URL or the Pages site; verify live behaviour only via the Cloudflare connector or by asking the user.
+- Git commit trailers: `Co-Authored-By: Claude Sonnet 5.5 <noreply@anthropic.com>` and `Claude-Session: <session url>`.
+- Registry storage keys: `g:<email>` = {ref,name,email,status,requested}; `r:<ref>` -> 'g:<email>' (or a deviceId for legacy/owner); `d:<deviceId>` = {google:email} or {owner:true,...}; `v:<ref>` = vault cents.
+- Client: `isAdminAcct` (set from `/api/access/status` `admin`), `adminHdr()` sends the key only if one is stored; `$('gateRequest').hidden = true` always.
+- Tests live in `tests/` (run with node): google, admin, quick, parity (15,000 random actions Core vs server), rules, rounds, fx, plus Playwright screenshot scripts. They need a fake DOM / copy of the worker (`w.mjs`); see the head of each file. `test2.js` is legacy and fails by design.
+- Preferences from the user: no real money, phone-first, ignores multiple-choice questions (decide and state assumptions), wants HANDOFF.md updated on every change.
+
 ## TO DO next
+0. Ask the user to confirm Google sign-in works on a phone and that their admin account shows the Admin tab with no key (Google Cloud origin + test users must be set).
 1. Ask the user to retest on real phones: stop hosting after a refresh, remove a player, a full quick round.
 2. Get the rest of the "lots of bugs" list from the first play session.
 3. Known loose ends: offline mode has no rounds (by design); trivia answer check is client-side (honor system, capped); Google button needs the Pages origin in the Google Cloud OAuth client and testers added while in Testing mode.
