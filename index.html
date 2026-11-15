@@ -1955,9 +1955,10 @@ var Core = (function () {
     var hostOnline = online.role === 'host';
     $('addPanel').hidden = hostOnline || (pr && (!!seat || locked));
     $('hostFundHint').hidden = !hostOnline;
-    $('addTitle').textContent = pr ? 'Take a seat' + (vaultBal !== null ? ' · bank ' + Core.fmt(vaultBal) : '') : 'Add player';
+    $('addTitle').textContent = pr ? 'Take a seat as ' + (lsGet(NAME_KEY) || 'you') + (vaultBal !== null ? ' · bank ' + Core.fmt(vaultBal) : '') : 'Add player';
     $('addBtn').textContent = pr ? 'Take seat' : 'Add Player';
     nameEl.placeholder = pr ? 'Your name' : 'Name';
+    nameEl.parentNode.hidden = pr;                     // online you play as your signed-in account: no name to type
     $('toolbar').hidden = pr && (!seat || locked);
     $('resetBtn').hidden = pr;
     $('rulesPanel').hidden = pr;
@@ -2632,15 +2633,14 @@ var Core = (function () {
     if (busy) return;
     busy = true;
     try {
-      var name = nameEl.value, text = startEl.value;
+      var name = isPlayer() ? (lsGet(NAME_KEY) || 'Player') : nameEl.value, text = startEl.value;
       var res = await perform({ type: 'add', name: name, startText: text });
       if (!res.ok) { setAddMsg(res.error, false); return; }
       var cents = Core.parseMoney(text);
-      if (isPlayer()) lsSet(NAME_KEY, name.trim());
       nameEl.value = ''; startEl.value = '';          // cleared only after success
       setAddMsg((isPlayer() ? 'You are seated with ' : 'Added ' + name.trim() + ' with ') + Core.fmt(cents) + '.', true);
       render();
-      nameEl.focus();
+      (isPlayer() ? startEl : nameEl).focus();
     } finally { busy = false; }
   }
 

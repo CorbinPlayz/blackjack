@@ -22,6 +22,7 @@ await T.obj.fetch(new Request('https://room/init', { method: 'POST', body: JSON.
 const act = async (code, who, action) => {          // who: 'H' = host, or an account letter
   const r = room(code);
   const h = { 'X-Code': code, 'X-Ref': who === 'H' ? ref.A : ref[who] };
+  if (who !== 'H') h['X-Name'] = encodeURIComponent('Google ' + who);
   if (who === 'H') h.Authorization = 'Bearer ' + r.tok;
   const res = await r.obj.fetch(new Request('https://room/act', { method: 'POST', headers: h, body: JSON.stringify({ action }) }));
   return Object.assign(await res.json(), { _s: res.status });
@@ -102,6 +103,8 @@ ok(table('TBL01').funded === table('TBL01').house, 'with no seats left the table
 
 // reset creates nothing
 await act('TBL01', 'C', { type: 'seat', name: 'Cy', buyin: 1000 });
+// your seat is named after your signed-in account, not what the page typed
+ok(table('TBL01').players.some(p => p.name === 'Google C') && !table('TBL01').players.some(p => p.name === 'Cy'), 'the seat takes the account\'s name, whatever name was typed');
 const tot = accounts() + onTables(); await act('TBL01', 'H', { type: 'reset' });
 ok(accounts() + onTables() === tot && conserved(), 'reset creates and destroys no chips');
 

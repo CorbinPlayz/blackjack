@@ -52,8 +52,8 @@ const shots = process.env.SHOTS || '';
   ok(/waiting for players|dealing once/i.test(await p.locator('#roundPanel').innerText()), 'with nobody seated it waits for players');
   await shot('1-empty');
   // take a seat from the bank account
-  await p.fill('#newName', 'Pat'); await p.fill('#newStart', '500'); await p.click('#addBtn'); await p.waitForTimeout(1200);
-  ok(/Pat/.test(await p.locator('#roundPanel').innerText()), 'the new seat shows on the dealer table');
+  await p.fill('#newStart', '500'); await p.click('#addBtn'); await p.waitForTimeout(1200);
+  ok(/Admin/.test(await p.locator('#roundPanel').innerText()), 'the new seat shows on the dealer table');
   ok((await call('GET', '/api/vault', devP))._s === 200 && (await call('GET', '/api/vault', devP)).balance === 50000, 'the $500 buy-in came out of the $1,000 bank account');
   ok(await p.locator('#hostFundHint').isHidden(), 'players do not see the host-only hint');
   // wager

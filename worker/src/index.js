@@ -353,7 +353,7 @@ function applyCore(t, actor, a, ctx, ops) {
       if (host) return deny('Use Add Player to seat someone as host.');
       if (!actor.ref) return deny('Your device is not recognised.');
       if (t.players.some(mine)) return deny('You already have a seat.');
-      const name = cleanName(a.name);
+      const name = funded && cleanName(ctx.name) ? cleanName(ctx.name) : cleanName(a.name);     // online: you ARE your signed-in account, the name comes from it
       if (!name) return deny('Enter your name.');
       if (!isCents(a.buyin)) return deny('Starting balance must be more than $0.');
       const m = overMax(a.buyin); if (m) return deny(m);
@@ -716,13 +716,13 @@ function keyOk(request, env) {
 async function identify(request, env) {
   const key = keyOk(request, env);
   const id = request.headers.get('X-Device-Id') || '';
-  let ok = false, ref = '', email = '';
+  let ok = false, ref = '', email = '', name = '';
   if (ID_RE.test(id)) {
     const d = await (await reg(env, '/status', { deviceId: id })).json();
-    if (d.status === 'approved') { ok = true; ref = d.ref || ''; email = d.email || ''; }
+    if (d.status === 'approved') { ok = true; ref = d.ref || ''; email = d.email || ''; name = d.name || ''; }
   }
   const admin = key || (ok && !!email && adminEmails(env).includes(email));
-  return { ok: ok || key, ref, email, admin };
+  return { ok: ok || key, ref, email, name, admin };
 }
 async function isAdmin(request, env) { return (await identify(request, env)).admin; }
 
@@ -863,7 +863,7 @@ export default {
       if (body.length > 4096) return json({ error: 'too large' }, 413);
       return withCors(await stub.fetch('https://room/act', {
         method: 'POST',
-        headers: { Authorization: request.headers.get('Authorization') || '', 'X-Ref': who.ref, 'X-Code': code },
+        headers: { Authorization: request.headers.get('Authorization') || '', 'X-Ref': who.ref, 'X-Name': encodeURIComponent(who.name || ''), 'X-Code': code },
         body,
       }));
     }
@@ -932,10 +932,11 @@ export class Room {
       const table = normalizeTable(await this.state.storage.get('table'));
       const secret = normalizeSecret(await this.state.storage.get('secret'));
       const ref = request.headers.get('X-Ref') || '';
+      let accName = ''; try { accName = decodeURIComponent(request.headers.get('X-Name') || ''); } catch (e) { accName = ''; }
       const act = body && body.action;
       let account;                                     // bank account balance, only fetched when an action spends from it
       if (act && ref && ['seat', 'rebuy', 'vault_withdraw'].includes(act.type)) account = (await (await reg(this.env, '/vault/get', { ref })).json()).balance;
-      const res = applyAction(table, { role: isHost ? 'host' : 'player', ref }, act, { funded: true, account, secret, now });
+      const res = applyAction(table, { role: isHost ? 'host' : 'player', ref }, act, { funded: true, account, secret, now, name: accName });
       if (!res.ok) return json({ ok: false, error: res.error }, 400);
       let vaultBalance;
       if (res.ops && res.ops.length) {                 // accounts are updated first (all or nothing, once per table version): if the bank refuses, the table is not saved
@@ -1017,9 +1018,9 @@ export class Registry {
       const d = await s.get('d:' + b.deviceId);
       if (d && d.google) {                           // a device signed in with Google follows its account
         const a = await s.get('g:' + d.google);
-        return json({ status: a ? a.status : 'none', ref: a ? a.ref : undefined, email: d.google });
+        return json({ status: a ? a.status : 'none', ref: a ? a.ref : undefined, email: d.google, name: a ? a.name : undefined });
       }
-      if (d && d.owner === true) return json({ status: d.status, ref: d.ref });          // the owner's own device, approved with the admin key
+      if (d && d.owner === true) return json({ status: d.status, ref: d.ref, name: d.name });          // the owner's own device, approved with the admin key
       return json({ status: 'none' });                                                    // old name-only approvals no longer count: Google is required
     }
 
