@@ -1,5 +1,8 @@
 # Handoff: Blackjack Chip Tracker (friends-only, no real money)
 
+READ FIRST: (1) "What it is" and "State of the world" = what exists today. (2) "NEXT BIG FEATURE" = the fake-bank + casino + online-dealer plan; it is a long list of user decisions in order, ALL of them are settled, nothing is built yet. (3) "TO DO next" = small follow-ups. Update this file with every change.
+Practical notes: Cloudflare account id comes from `mcp__cloudflare__whoami` (or `accountId` inside `mcp__cloudflare__execute`). The sandbox has no network for pip/npm (free plan) and cannot reach the worker or Pages site. The user's old play-test "bug list" was never fully collected (only stop-hosting, remove players, slow rounds were reported). The existing table `rebuy` ("bank trip") makes chips from nothing; the bank plan replaces it. Settings that must remain private: ADMIN_KEY and ADMIN_EMAILS (Worker secrets only, never in the repo or chat logs).
+
 ## What it is
 A chip tracker for an in-person blackjack game (the cards are physical, only chips live in the app).
 - `index.html`: the whole client, one file, vanilla JS. Script 1 = `Core` (offline rules, localStorage). Script 2 = UI IIFE. `<script type="text/plain" id="triviaData">` holds 594 trivia questions (`#Category` lines, then `question|correct|wrong|wrong|wrong`).
