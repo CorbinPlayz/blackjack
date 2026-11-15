@@ -31,6 +31,16 @@ Worker (with autoBet, start-anyway, finish, undo-reopens-round, in-page confirm 
 - Tests live in `tests/` (run with node): google, admin, quick, parity (15,000 random actions Core vs server), rules, rounds, fx, plus Playwright screenshot scripts. They need a fake DOM / copy of the worker (`w.mjs`); see the head of each file. `test2.js` is legacy and fails by design.
 - Preferences from the user: no real money, phone-first, ignores multiple-choice questions (decide and state assumptions), wants HANDOFF.md updated on every change.
 
+## NEXT BIG FEATURE (requested 2026-11-14, NOT started): fake bank accounts, no infinite money
+User: "we need this to be a site where people can track their bank accounts 'fake banks' but can't just give themselves infinite money". Plan (assumptions, user ignores multiple-choice questions, so decide and state):
+- The existing per-account vault (`v:<ref>` in Registry) becomes the bank account. Add an append-only ledger `l:<ref>:<seq>` {t, type, amount, balanceAfter, counterparty, note} and a global `supply` total.
+- Money may only enter via: (a) a one-time signup grant per Google account (fixed amount, e.g. $1,000, flag `granted`), (b) admin "mint" (admin-only, logged with who/why), (c) trivia winnings (already capped per table). Everything else conserves money: transfers between accounts, table buy-in (account -> seat), cash-out (seat -> account), table losses go to the dealer/other players, not deleted.
+- Close the holes: table `rebuy` ("bank trip") currently creates chips from nothing (only fee/trip-limited). Make it debit the account instead; `add` by host and `seat` with an arbitrary buy-in must also debit the account (no free chips). Seat balance cash-out must be credited exactly once (server-authoritative, idempotent, e.g. on remove/leave/table end).
+- Invariant test: sum of all account balances + chips on live tables == total minted; add it to `parity.test.mjs`-style randomized tests. All balance changes only inside the Registry Durable Object (single-threaded, so no race/double-spend).
+- UI: new "Bank" tab (balance, ledger, send money to a friend by email/name, admin mint panel). Client never sends a balance, only intents.
+- Open questions to mention to the user, not block on: starting grant size, whether losing at tables moves money between players (recommended: yes, dealer is a player/bank account) and whether an admin can mint freely.
+Update this file as each step lands.
+
 ## TO DO next
 0. Ask the user to confirm Google sign-in works on a phone and that their admin account shows the Admin tab with no key (Google Cloud origin + test users must be set).
 1. Ask the user to retest on real phones: stop hosting after a refresh, remove a player, a full quick round.
