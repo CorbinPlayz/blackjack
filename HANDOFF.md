@@ -39,6 +39,7 @@ User: "we need this to be a site where people can track their bank accounts 'fak
 - Invariant test: sum of all account balances + chips on live tables == total minted; add it to `parity.test.mjs`-style randomized tests. All balance changes only inside the Registry Durable Object (single-threaded, so no race/double-spend).
 - UI: new "Bank" tab (balance, ledger, send money to a friend by email/name, admin mint panel). Client never sends a balance, only intents.
 - Open questions to mention to the user, not block on: starting grant size, whether losing at tables moves money between players (recommended: yes, dealer is a player/bank account) and whether an admin can mint freely.
+USER DECISION (2026-11-14): the DEALER holds the "casino's" money, so the dealer feels the wins and losses of the table too, but casino money must NOT count toward the dealer's personal leaderboard / net worth (no leaderboard advantage). Implement as a separate casino balance (house pot) the dealer controls during their shift: player losses go into it, player wins come out of it; leaderboard counts only personal accounts + own chips. Hand-over moves the casino pot to the next dealer (it belongs to the table, not the person). Open: where the casino pot starts, whether it can go negative.
 Update this file as each step lands.
 
 ## TO DO next
