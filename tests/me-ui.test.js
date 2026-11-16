@@ -19,6 +19,10 @@ const html = path.resolve(__dirname, '../index.html'); const shots = process.env
   const txt = await p.locator('#tab-me').innerText();
   ok(/Your bank account/i.test(txt) && /\$1,234\.56/.test(txt), 'the Me tab shows the bank balance without joining a table');
   ok(/Welcome grant/.test(txt) && /Dealer cut/.test(txt), 'and the history of the account');
+  ok(await p.locator('#vaultSave').isVisible() && await p.locator('#vaultTake').isVisible(), 'Save and Withdraw are always there');
+  ok(/locked/.test(await p.locator('#vaultSave').getAttribute('class')) && (await p.locator('#vaultSave').getAttribute('aria-disabled')) === 'true', 'and grayed out while you have no seat');
+  await p.locator('#vaultSave').click({ force: true }); await p.waitForTimeout(100);
+  ok(/shake/.test(await p.locator('#vaultSave').getAttribute('class')) && /Take a seat/.test(await p.locator('#vaultMsg').innerText()), 'tapping a grayed-out button shakes it and says why');
   if (shots) await p.screenshot({ path: path.join(shots, 'me.png') });
   ok(!errs.length, 'no page errors: ' + errs.join('|'));
   await b.close(); console.log('ALL', n, 'ME TAB CHECKS PASSED');

@@ -285,6 +285,10 @@
   body.fx-off *, body.fx-off *::before, body.fx-off *::after { animation: none !important; transition: none !important; }
   @media (prefers-reduced-motion: reduce) { * , *::before, *::after { animation: none !important; transition: none !important; } }
   /* bankruptcy lockdown: the whole site is this screen (the server also refuses every call, so hiding it in dev tools changes nothing) */
+  .btn-ghost.locked { opacity: .4; filter: grayscale(1); cursor: not-allowed; }
+  .shake { animation: vshake .45s; }
+  @keyframes vshake { 0%, 100% { transform: translateX(0); } 15% { transform: translateX(-7px); } 35% { transform: translateX(6px); } 55% { transform: translateX(-4px); } 75% { transform: translateX(3px); } }
+  @media (prefers-reduced-motion: reduce) { .shake { animation: none; } }
   #lockdown { position: fixed; inset: 0; z-index: 99999; display: none; flex-direction: column; align-items: center; justify-content: center; text-align: center; padding: 24px; overflow: hidden; color: #fff;
     background: radial-gradient(ellipse at 50% 25%, #35104d 0%, #12031f 55%, #05010a 100%); }
   #lockdown.on { display: flex; }
@@ -2625,19 +2629,25 @@ var Core = (function () {
     var pr = canSit(), me = pr ? mySeat() : null;
     $('vaultPanel').hidden = vaultBal === null;
     $('vaultInfo').textContent = 'Your bank account: ' + Core.fmt(vaultBal || 0) + '. ' + (me ? 'Chips on your seat go back here when you leave the table.' : 'Every chip you play with comes out of it: take a seat at an online table to play.');
-    $('vaultAmt').hidden = !me;
+    $('vaultAmt').disabled = !me;
     var LT = { grant: 'Welcome grant', mint: 'Added by admin', buyin: 'To a table', cashout: 'From a table', trivia: 'Trivia winnings', dealercut: 'Dealer cut', fee: 'Bank fee' };
     $('bankLedger').textContent = bankLedger.slice(0, 15).map(function (e) {
       return new Date(e.t).toLocaleDateString() + '  ' + (LT[e.type] || e.type) + '  ' + (e.amount > 0 ? '+' : '-') + Core.fmt(Math.abs(e.amount)) + '  (balance ' + Core.fmt(e.balance) + ')';
     }).join('\n');
-    $('vaultSave').hidden = !me; $('vaultTake').hidden = !me;
+    [$('vaultSave'), $('vaultTake')].forEach(function (b) { b.classList.toggle('locked', !me); b.setAttribute('aria-disabled', me ? 'false' : 'true'); });   // always there; grayed out (and shaking when tapped) until you hold a seat
     var fv = $('fromVaultRow'), show = false;                // buy-ins always come from the account now, so there is no checkbox
     if (fv.style) fv.style.display = show ? 'block' : 'none'; fv.hidden = !show;
     $('fromVaultTxt').textContent = 'Use saved chips from my vault (' + Core.fmt(vaultBal || 0) + ') as my buy-in';
   }
   function vaultGo(op) {
     return async function (e) {
-      e.preventDefault(); var me = mySeat(); if (busy || !me) return; busy = true;
+      e.preventDefault(); var me = mySeat();
+      if (!me) {                                      // no seat: the button is grayed out and shakes
+        var b = e.currentTarget; b.classList.remove('shake'); void b.offsetWidth; b.classList.add('shake');
+        $('vaultMsg').textContent = 'Take a seat at an online table to move chips between your bank account and the table.'; $('vaultMsg').className = 'msg';
+        return;
+      }
+      if (busy) return; busy = true;
       try {
         var res = await perform({ type: 'vault', op: op, pid: me.id, amountText: $('vaultAmt').value });
         $('vaultMsg').textContent = res.ok ? (op === 'in' ? 'Saved to your vault.' : 'Withdrawn to the table.') : res.error;
