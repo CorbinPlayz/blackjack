@@ -1954,8 +1954,9 @@ var Core = (function () {
     renderTabs();
     var pr = isPlayer(), seat = pr ? mySeat() : null, locked = paused();
     var hostOnline = online.role === 'host';
-    $('addPanel').hidden = hostOnline || (pr && (!!seat || locked));
-    $('hostFundHint').hidden = !hostOnline;
+    $('addPanel').hidden = !pr || !!seat || locked;      // no more "Add player": your Google account is your seat (join an online table)
+    $('hostFundHint').hidden = pr;
+    $('hostFundHint').textContent = hostOnline ? 'Every seat is paid for from a real bank account, so nobody can be added with free chips. Ask each player to join the table and take their own seat. Chips go back to their account when they leave.' : 'Players are no longer added by hand: your signed-in Google account is your seat. Open a table or join one with a code (Host / Join), then take a seat from your bank account.';
     $('addTitle').textContent = pr ? 'Take a seat as ' + (lsGet(NAME_KEY) || 'you') + (vaultBal !== null ? ' · bank ' + Core.fmt(vaultBal) : '') : 'Add player';
     $('addBtn').textContent = pr ? 'Take seat' : 'Add Player';
     nameEl.placeholder = pr ? 'Your name' : 'Name';

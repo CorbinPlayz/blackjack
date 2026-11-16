@@ -76,6 +76,7 @@ Update this file as each step lands.
   - Pot at zero: `brokeAt` is only RECORDED so far; the max bet becomes 0 so nobody can bet. The 24h lockdown (423 on every call, neon screen, new casino with epoch+1 and a fresh $100,000) is STEP 5.
   - Tests: `tests/casino.test.mjs` (17 checks: pot creation, max bet, pot shrink, six real rounds moving money, clamp/broke, 5% cut, no cut cases); `funded.test.mjs` now 35 checks and `dealer.test.mjs` 93 (both use the new invariant); UI test 14. Run `cp worker/src/index.js tests/w.mjs; cp worker/src/index.js tests/worker.mjs` first.
   - Friendly-table note for the user: a friendly table can only pay wins out of chips it has already collected, so the first win there is denied until someone has lost.
+- FOLLOW-UP 2 (user: "the add player thing is still there", 2026-11-15): the "Add player" panel is now hidden everywhere except a player taking their own seat; on the offline/local tracker and for hosts a hint explains that your Google account is your seat (open or join a table). The Core offline add logic is still in the code, just unreachable from the UI.
 - NEXT: step 5 = bankruptcy lockdown (Registry-side lock on EVERY API call -> HTTP 423 + `until`, full-screen Vegas neon "THE HOUSE WENT BROKE" with big timer and falling chips, exactly 24h, then a new casino: epoch+1, pot $100,000 added to supply and the old pot removed from supply). Then step 6 leaderboard + Bank tab, step 7 loans.
 
 ## TO DO next
