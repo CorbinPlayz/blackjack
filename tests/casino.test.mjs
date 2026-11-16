@@ -118,4 +118,17 @@ await mkCutTable('CAS12', 'A', 1, -20000);
 const m3 = room('CAS12').st.m.get('meta'); m3.updated = Date.now() - 25 * 3600 * 1000; room('CAS12').st.m.set('meta', m3);
 await room('CAS12').obj.fetch(new Request('https://room/state', { headers: { 'X-Code': 'CAS12' } }));
 ok((await bal('A')) === a3 && conserved(), 'no cut when the casino lost money at the table');
+// ---- the host can play at their own online dealer table ----
+{
+  await init('CAS20', 'A');
+  const hostAct = async action => { const res = await room('CAS20').obj.fetch(new Request('https://room/act', { method: 'POST', headers: { 'X-Code': 'CAS20', 'X-Ref': ref.A, 'X-Name': encodeURIComponent('Host Google'), Authorization: 'Bearer ' + room('CAS20').tok }, body: JSON.stringify({ action }) })); return Object.assign(await res.json(), { _s: res.status }); };
+  const a0 = await bal('A');
+  let rr = await hostAct({ type: 'seat', buyin: 10000 });
+  ok(rr.ok && (await bal('A')) === a0 - 10000 && table('CAS20').players[0].owner === ref.A, 'the host takes a seat at their own online dealer table, paid from their bank account');
+  rr = await hostAct({ type: 'bet', pid: 1, amount: 5000 });
+  ok(rr.ok && table('CAS20').players[0].bet === 5000, 'and can place a wager like any player');
+  rr = await hostAct({ type: 'settle', pid: 1, outcome: 'win' });
+  ok(rr._s === 400, 'but still cannot settle their own hand (the server dealer does that)');
+  ok(conserved(), 'invariant holds');
+}
 console.log('ALL', n, 'CASINO CHECKS PASSED');

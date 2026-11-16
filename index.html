@@ -1430,6 +1430,7 @@ var Core = (function () {
   var pollTimer = null, lastV = -1, polling = false, firstSnap = false;
 
   function isPlayer() { return online.role === 'viewer'; }
+  function canSit() { return online.role === 'viewer' || (online.role === 'host' && !!Core.state.settings.auto); }   // the host of an online dealer table can sit and play like anyone else
   function paused() { return !!Core.state.settings.locked; }
   function mySeat() {
     if (!myRef) return null;
@@ -1952,7 +1953,7 @@ var Core = (function () {
 
   function render() {
     renderTabs();
-    var pr = isPlayer(), seat = pr ? mySeat() : null, locked = paused();
+    var pr = canSit(), seat = pr ? mySeat() : null, locked = isPlayer() && paused();
     var hostOnline = online.role === 'host';
     $('addPanel').hidden = !pr || !!seat || locked;      // no more "Add player": your Google account is your seat (join an online table)
     $('hostFundHint').hidden = pr;
@@ -1961,7 +1962,7 @@ var Core = (function () {
     $('addBtn').textContent = pr ? 'Take seat' : 'Add Player';
     nameEl.placeholder = pr ? 'Your name' : 'Name';
     nameEl.parentNode.hidden = pr;                     // online you play as your signed-in account: no name to type
-    $('toolbar').hidden = pr && (!seat || locked);
+    $('toolbar').hidden = isPlayer() && (!seat || locked);
     $('resetBtn').hidden = pr;
     $('rulesPanel').hidden = pr;
     $('feeInfo').textContent = 'Taking chips from the bank costs a ' + Core.state.settings.bankFee + '% fee, each player can go ' + (Core.state.settings.bankLimit ? Core.state.settings.bankLimit + ' time' + (Core.state.settings.bankLimit === 1 ? '' : 's') : 'as often as they like') + ', and chips taken count against net profit.';
@@ -1975,7 +1976,7 @@ var Core = (function () {
     $('autoBetBtn').hidden = !online.role || !Core.state.settings.rounds;
     $('autoBetBtn').textContent = 'Repeat last wager: ' + (Core.state.settings.autoBet ? 'On' : 'Off');
     $('lockBtn').textContent = locked ? 'Resume players' : 'Pause players';
-    $('lockBanner').hidden = !(pr && locked);
+    $('lockBanner').hidden = !(isPlayer() && locked);
     if (pr && !$('addPanel').hidden && !nameEl.value) nameEl.value = lsGet(NAME_KEY) || '';   // pre-fill only while the form is showing
     // keep the cursor where it was if a live update re-draws the cards while someone is typing
     var ae = typeof document.activeElement !== 'undefined' ? document.activeElement : null;
@@ -2219,8 +2220,8 @@ var Core = (function () {
     switch (a.type) {
       case 'add':
         c = Core.checkPlayer(a.name, a.startText); if (!c.ok) return c;
-        body = isPlayer() ? { type: 'seat', name: c.name, buyin: c.cents } : { type: 'add', name: c.name, start: c.cents };
-        if (isPlayer()) body.fromVault = true;                // online buy-ins always come out of your bank account
+        body = canSit() ? { type: 'seat', name: c.name, buyin: c.cents } : { type: 'add', name: c.name, start: c.cents };
+        if (canSit()) body.fromVault = true;                // online buy-ins always come out of your bank account
         break;
       case 'settle':
         c = roundsOn() ? { ok: true, cents: 0 } : Core.checkWager(a.wagerText); if (!c.ok) return c;   // in rounds the hand in play is the wager
@@ -2572,7 +2573,7 @@ var Core = (function () {
     }).catch(function () {});
   }
   function renderVault() {
-    var pr = isPlayer(), me = pr ? mySeat() : null;
+    var pr = canSit(), me = pr ? mySeat() : null;
     $('vaultPanel').hidden = !(pr && vaultBal !== null);
     $('vaultInfo').textContent = 'Your bank account: ' + Core.fmt(vaultBal || 0) + '. Every chip you play with comes out of it, and goes back in when you leave the table or save chips.';
     var LT = { grant: 'Welcome grant', mint: 'Added by admin', buyin: 'To a table', cashout: 'From a table', trivia: 'Trivia winnings', dealercut: 'Dealer cut' };
@@ -2640,14 +2641,14 @@ var Core = (function () {
     if (busy) return;
     busy = true;
     try {
-      var name = isPlayer() ? (lsGet(NAME_KEY) || 'Player') : nameEl.value, text = startEl.value;
+      var name = canSit() ? (lsGet(NAME_KEY) || 'Player') : nameEl.value, text = startEl.value;
       var res = await perform({ type: 'add', name: name, startText: text });
       if (!res.ok) { setAddMsg(res.error, false); return; }
       var cents = Core.parseMoney(text);
       nameEl.value = ''; startEl.value = '';          // cleared only after success
-      setAddMsg((isPlayer() ? 'You are seated with ' : 'Added ' + name.trim() + ' with ') + Core.fmt(cents) + '.', true);
+      setAddMsg((canSit() ? 'You are seated with ' : 'Added ' + name.trim() + ' with ') + Core.fmt(cents) + '.', true);
       render();
-      (isPlayer() ? startEl : nameEl).focus();
+      (canSit() ? startEl : nameEl).focus();
     } finally { busy = false; }
   }
 

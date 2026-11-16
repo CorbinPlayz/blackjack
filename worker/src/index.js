@@ -356,7 +356,7 @@ function applyCore(t, actor, a, ctx, ops) {
       return { ok: true };
     }
     case 'seat': {                                   // a player takes their own seat
-      if (host) return deny('Use Add Player to seat someone as host.');
+      if (host && !auto) return deny('Use Add Player to seat someone as host.');
       if (!actor.ref) return deny('Your device is not recognised.');
       if (t.players.some(mine)) return deny('You already have a seat.');
       const name = funded && cleanName(ctx.name) ? cleanName(ctx.name) : cleanName(a.name);     // online: you ARE your signed-in account, the name comes from it
