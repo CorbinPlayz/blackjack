@@ -1318,6 +1318,7 @@ var Core = (function () {
     var dl = s.deal && typeof s.deal === 'object' ? s.deal : null;
     out.deal = dl ? { phase: typeof dl.phase === 'string' ? dl.phase : 'betting', startedAt: Number.isInteger(dl.startedAt) ? dl.startedAt : 0, deadline: Number.isInteger(dl.deadline) ? dl.deadline : 0,
       cards: Array.isArray(dl.cards) ? dl.cards.filter(function (c) { return Number.isInteger(c) && c >= 0 && c < 52; }) : [], hole: dl.hole === true, dealerBJ: dl.dealerBJ === true } : null;
+    out.maxBet = Number.isInteger(s.maxBet) && s.maxBet >= 0 ? s.maxBet : 0;   // online dealer: the biggest wager the casino accepts (2% of its pot)
     var rd = s.round && typeof s.round === 'object' ? s.round : {};
     out.round = { n: Number.isInteger(rd.n) && rd.n > 0 ? rd.n : 1, phase: rd.phase === 'playing' ? 'playing' : 'betting' };
     out.dealer = typeof s.dealer === 'string' ? s.dealer : ''; out.dealerReq = typeof s.dealerReq === 'string' ? s.dealerReq : '';
@@ -2079,6 +2080,7 @@ var Core = (function () {
           var seenQ = {};
           [0.05, 0.1, 0.25, 0.5].forEach(function (f) {
             var c = Math.max(100, Math.round(p.balance * f / 100) * 100); if (c > p.balance) c = p.balance;
+            if (auto && Core.state.maxBet > 0 && c > Core.state.maxBet) c = Core.state.maxBet;
             if (c < 1 || seenQ[c]) return; seenQ[c] = 1;
             var qbtn = el('button', 'btn-ghost' + (p.bet === c ? ' sel' : ''), Core.fmt(c)); qbtn.type = 'button';
             qbtn.setAttribute('data-action', 'qbet'); qbtn.setAttribute('data-amt', String(c)); qb.appendChild(qbtn);
@@ -2299,6 +2301,9 @@ var Core = (function () {
   function secsLeft(ts) { return Math.max(0, Math.ceil((ts - (Date.now() + skew)) / 1000)); }
   function tickTimer() { var e = $('dealTimer'); if (!e) return; var u = parseInt(e.getAttribute('data-until') || '0', 10); e.textContent = u ? secsLeft(u) + 's' : ''; }
   setInterval(tickTimer, 500);
+  var casinoPot = null;
+  function loadPot() { if (!isAuto()) return; api('/api/casino').then(function (r) { return r.ok ? r.json() : null; }).then(function (j) { if (j && typeof j.pot === 'number') casinoPot = j.pot; }).catch(function () {}); }
+  setInterval(loadPot, 10000); setTimeout(loadPot, 1500);
   // Basic strategy for 6 decks, dealer stands on 17, double after split allowed, split once.
   function strategy(h, up, canDouble, canSplit) {
     var tt = handTot(h.cards), t = tt.total, u = cVal(up), v = cVal(h.cards[0]);
@@ -2336,6 +2341,7 @@ var Core = (function () {
     var bar = el('div', 'rbar'), left = el('div');
     left.appendChild(el('div', 'big', 'Round ' + t.round.n + ' · ' + title));
     left.appendChild(el('div', 'sub2', 'Online dealer · stands on all 17 · blackjack pays 3:2 · split once'));
+    left.appendChild(el('div', 'sub2', (casinoPot === null ? '' : 'Casino pot ' + Core.fmt(casinoPot) + ' · ') + 'Max bet ' + Core.fmt(t.maxBet || 0)));
     bar.appendChild(left);
     var tm = el('div', 'big timer'); tm.id = 'dealTimer'; tm.setAttribute('data-until', String(until || 0)); bar.appendChild(tm);
     box.appendChild(bar);
@@ -2568,7 +2574,7 @@ var Core = (function () {
     var pr = isPlayer(), me = pr ? mySeat() : null;
     $('vaultPanel').hidden = !(pr && vaultBal !== null);
     $('vaultInfo').textContent = 'Your bank account: ' + Core.fmt(vaultBal || 0) + '. Every chip you play with comes out of it, and goes back in when you leave the table or save chips.';
-    var LT = { grant: 'Welcome grant', mint: 'Added by admin', buyin: 'To a table', cashout: 'From a table', trivia: 'Trivia winnings' };
+    var LT = { grant: 'Welcome grant', mint: 'Added by admin', buyin: 'To a table', cashout: 'From a table', trivia: 'Trivia winnings', dealercut: 'Dealer cut' };
     $('bankLedger').textContent = bankLedger.slice(0, 8).map(function (e) {
       return new Date(e.t).toLocaleDateString() + '  ' + (LT[e.type] || e.type) + '  ' + (e.amount > 0 ? '+' : '-') + Core.fmt(Math.abs(e.amount)) + '  (balance ' + Core.fmt(e.balance) + ')';
     }).join('\n');

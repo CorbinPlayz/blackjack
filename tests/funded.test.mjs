@@ -31,11 +31,12 @@ const table = code => room(code).st.m.get('table');
 const humanDealer = async code => { const r = await act(code, 'H', { type: 'settings', auto: false }); assert.ok(r.ok, 'switch to human dealer: ' + r.error); };
 const supply = () => regSt.m.get('supply') || 0;
 const accounts = () => { let s = 0; for (const [k, v] of regSt.m) if (k.startsWith('v:')) s += v; return s; };
-const onTables = () => { let s = 0; for (const c of Object.keys(rooms)) { const t = room(c).st.m.get('table'); if (t) s += t.players.reduce((a, p) => a + p.balance, 0) + (t.house || 0); } return s; };
-const conserved = () => accounts() + onTables() === supply();
+const onTables = () => { let s = 0; for (const c of Object.keys(rooms)) { const t = room(c).st.m.get('table'); if (t) s += t.players.reduce((a, p) => a + p.balance, 0) + ((t.house || 0) - (t.hs || 0)); } return s; };   // house chips already moved into the casino pot (hs) are counted in the pot
+const pot = () => (regSt.m.get('casino') || { pot: 0 }).pot;
+const conserved = () => accounts() + onTables() + pot() === supply();
 
 await humanDealer('TBL01');
-ok((await bal('A')) === 100000 && (await bal('B')) === 100000 && (await bal('C')) === 100000 && supply() === 300000, 'every account is granted $1,000 once, even before it opens the bank page');
+ok((await bal('A')) === 100000 && (await bal('B')) === 100000 && (await bal('C')) === 100000 && supply() - pot() === 300000, 'every account is granted $1,000 once, even before it opens the bank page');
 ok(conserved(), 'invariant: accounts + chips on tables + house == total created');
 
 let r = await act('TBL01', 'H', { type: 'add', name: 'Free', start: 99999999 });
@@ -65,15 +66,17 @@ ok(r._s === 400 && /own hand|only change your own|dealer/i.test(r.error) && tabl
 r = await act('TBL01', 'B', { type: 'settle', pid: 2, outcome: 'loss' });
 ok(r._s === 400, 'a player cannot settle someone else either');
 r = await act('TBL01', 'H', { type: 'settle', pid: 1, outcome: 'win' });
-ok(r.ok && table('TBL01').players[0].balance === 54000 && table('TBL01').house === -4000, 'the dealer settles; the win comes out of the house, not thin air');
+ok(r._s === 400 && /only pays out chips it has won/.test(r.error) && table('TBL01').players[0].balance === 49000, 'a friendly table cannot pay a win it has not collected (colluding friends cannot print money)');
+r = await act('TBL01', 'H', { type: 'settle', pid: 2, outcome: 'loss' });
+ok(r.ok && table('TBL01').house === 6000 && table('TBL01').hs === 0 && pot() === 10000000, 'a loss goes to the table house, and a friendly table never touches the casino pot');
+r = await act('TBL01', 'H', { type: 'settle', pid: 1, outcome: 'win' });
+ok(r.ok && table('TBL01').players[0].balance === 54000 && table('TBL01').house === 1000, 'the dealer settles; the win is paid from chips the house collected');
 ok(conserved(), 'invariant holds after a win');
 r = await act('TBL01', 'B', { type: 'undo' });
 ok(r._s === 400 && /Only the dealer/.test(r.error), 'a player cannot undo a loss to get chips back');
-r = await act('TBL01', 'H', { type: 'settle', pid: 2, outcome: 'loss' });
-ok(r.ok && table('TBL01').house === 1000, 'loss goes to the house');
 r = await act('TBL01', 'H', { type: 'undo' });
-ok(r.ok && table('TBL01').house === -4000 && conserved(), 'dealer undo reverses the house too and the invariant holds');
-await act('TBL01', 'H', { type: 'settle', pid: 2, outcome: 'loss' });
+ok(r.ok && table('TBL01').house === 6000 && conserved(), 'dealer undo reverses the house too and the invariant holds');
+await act('TBL01', 'H', { type: 'settle', pid: 1, outcome: 'win' });
 
 // bank moves cannot be undone for free money
 await act('TBL01', 'B', { type: 'rebuy', pid: 1, amount: 1000 });

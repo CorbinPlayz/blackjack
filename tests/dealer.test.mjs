@@ -252,7 +252,7 @@ const v1 = st.v; ok((await gx()).v === v1, 'polling an unchanged table does not 
 // play the live round out through the API, then check the bank is untouched by settling
 for (let i = 0; i < 40; i++) { st = await gx(); if (st.state.deal.phase === 'results') break; if (st.state.deal.phase === 'insurance') { await rx('A', { type: 'insure', pid: 1, take: false }); await rx('B', { type: 'insure', pid: 2, take: false }); } else { await rx('A', { type: 'stand', pid: 1 }); await rx('B', { type: 'stand', pid: 2 }); } clock += 1000; }
 st = await gx(); ok(st.state.deal.phase === 'results' && st.state.deal.cards.length >= 2 && st.state.deal.hole === false, 'a round played through the API reaches results with the hole card shown');
-const sum = () => { let s = 0; for (const [k, v] of regSt.m) if (k.startsWith('v:')) s += v; const t = roomSt.m.get('table'); return s + t.players.reduce((a, p) => a + p.balance, 0) + t.house; };
+const sum = () => { let s = 0; for (const [k, v] of regSt.m) if (k.startsWith('v:')) s += v; const t = roomSt.m.get('table'); return s + t.players.reduce((a, p) => a + p.balance, 0) + (t.house - t.hs) + (regSt.m.get('casino') || { pot: 0 }).pot; };   // house chips already in the casino pot (hs) are counted in the pot
 ok(sum() === regSt.m.get('supply'), 'accounts + seats + house still equal the money supply after a dealt round');
 // idle table does not stay alive forever through polling
 const meta0 = roomSt.m.get('meta').updated; clock += 60000; await gx(); clock += 60000; await gx();
