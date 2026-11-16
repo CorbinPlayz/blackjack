@@ -1,0 +1,25 @@
+// Browser test: no Host tab any more; the Me tab shows the bank account (balance + history) for any signed-in player.
+const { chromium } = require('playwright'); const assert = require('assert'); const path = require('path');
+const html = path.resolve(__dirname, '../index.html'); const shots = process.env.SHOTS || '';
+(async () => {
+  const b = await chromium.launch(); let n = 0; const ok = (c, m) => { assert.ok(c, m); n++; console.log('PASS', m); };
+  const ctx = await b.newContext({ viewport: { width: 390, height: 844 }, isMobile: true, hasTouch: true });
+  const p = await ctx.newPage(); const errs = []; p.on('pageerror', e => errs.push(e.message));
+  const J = o => ({ status: 200, headers: { 'content-type': 'application/json', 'access-control-allow-origin': '*' }, body: JSON.stringify(o) });
+  await p.route('**/api/**', r => { const u = new URL(r.request().url()).pathname;
+    if (u === '/api/vault') return r.fulfill(J({ balance: 123456, ledger: [{ t: Date.now(), type: 'grant', amount: 100000, balance: 100000 }, { t: Date.now(), type: 'dealercut', amount: 23456, balance: 123456 }] }));
+    if (u === '/api/access/status') return r.fulfill(J({ status: 'approved', ref: 'abcd1234', admin: false }));
+    return r.fulfill(J({})); });
+  await p.route(/accounts\.google|gstatic|googleapis/, r => r.abort());
+  await p.addInitScript(() => { localStorage.setItem('bjDevice.v1', 'q'.repeat(32)); localStorage.setItem('bjAccess.v1', 'approved'); localStorage.setItem('bjRef.v1', 'abcd1234'); localStorage.setItem('bjName.v1', 'Pat'); });
+  await p.goto('file://' + html); await p.waitForTimeout(2000);
+  const labels = await p.locator('#nav button:visible').allInnerTexts();
+  ok(!labels.some(t => /host/i.test(t)) && labels.some(t => /me/i.test(t)), 'the bottom bar has no Host tab: ' + labels.join(' | ').replace(/\n/g, ' '));
+  await p.locator('#nav button[data-go="me"]').click(); await p.waitForTimeout(1200);
+  const txt = await p.locator('#tab-me').innerText();
+  ok(/Your bank account/i.test(txt) && /\$1,234\.56/.test(txt), 'the Me tab shows the bank balance without joining a table');
+  ok(/Welcome grant/.test(txt) && /Dealer cut/.test(txt), 'and the history of the account');
+  if (shots) await p.screenshot({ path: path.join(shots, 'me.png') });
+  ok(!errs.length, 'no page errors: ' + errs.join('|'));
+  await b.close(); console.log('ALL', n, 'ME TAB CHECKS PASSED');
+})().catch(e => { console.error('FAIL', e.message); process.exit(1); });

@@ -352,7 +352,7 @@
     <div class="online-status" id="onlineLabel"></div>
     <div class="online-code" id="onlineCode"></div>
     <div class="online-status" id="onlineState"></div>
-    <div class="online-actions mt"><button type="button" class="btn-ghost" id="leaveBtn">Leave</button></div>
+    <div class="online-actions mt"><button type="button" class="btn-ghost" id="inviteBtn2">Copy invite link</button><button type="button" class="btn-ghost" id="leaveBtn">Leave</button></div>
   </div>
   <div class="msg" id="onlineMsg" role="status"></div>
 </div>
@@ -397,7 +397,7 @@
 
 <section class="tab" id="tab-me" data-tab="me" hidden>
 <div class="panel" id="vaultPanel" hidden>
-  <h2>Your vault</h2>
+  <h2>Your bank account</h2>
   <div class="online-status" id="vaultInfo">Chips you save here stay yours between games.</div>
   <div class="online-status" id="bankLedger" style="font-size:12px;line-height:1.5;white-space:pre-line"></div>
   <input type="text" id="vaultAmt" placeholder="Chips $" inputmode="decimal" autocomplete="off">
@@ -414,7 +414,7 @@
   <button type="button" class="btn-ghost" id="fxBtn" style="flex:1">Effects: On</button>
   <button type="button" class="btn-ghost" id="sndBtn" style="flex:1">Sound: On</button>
 </div>
-  <div class="online-status mt" id="meHint">Your vault is available once you join an online table.</div>
+  <div class="online-status mt" id="meHint" hidden></div>
   <button type="button" class="btn-ghost" id="adminBtn" style="width:100%;margin-top:10px" hidden>Admin sign-in</button>
 </div>
 </section>
@@ -480,7 +480,6 @@
   <button type="button" data-go="table"><span class="ic">♠</span><span>Table</span></button>
   <button type="button" data-go="board"><span class="ic">🏆</span><span>Board</span></button>
   <button type="button" data-go="me"><span class="ic">👤</span><span>Me</span></button>
-  <button type="button" data-go="host"><span class="ic">⚙️</span><span>Host</span></button>
   <button type="button" data-go="admin"><span class="ic">🛡️</span><span>Admin<b id="navBadge"></b></span></button>
 </nav>
 
@@ -1968,7 +1967,7 @@ var Core = (function () {
   /* ---------- tabs ---------- */
   var TAB_KEY = 'bjTab.v1', curTab = lsGet(TAB_KEY) || 'table', adminTab = false, isAdminAcct = false;
   function tabVisible(n) {
-    if (n === 'host') return !isPlayer();
+    if (n === 'host') return false;                 // no more host settings: the server dealer runs the table and everyone plays from their own bank account
     if (n === 'admin') return !!ONLINE_URL && (adminTab || isAdminAcct || !!adminKeyVal());
     return ['table', 'board', 'me'].indexOf(n) >= 0;
   }
@@ -1990,6 +1989,7 @@ var Core = (function () {
     curTab = n; lsSet(TAB_KEY, n);
     renderTabs();
     if (n === 'admin') adminLoad();
+    if (n === 'me') refreshVault(true);
     try { window.scrollTo(0, 0); } catch (e) {}
   }
   $('nav').addEventListener('click', function (e) {
@@ -2615,7 +2615,7 @@ var Core = (function () {
   /* ---------- vault ---------- */
   var vaultFetched = 0;
   function refreshVault(force) {
-    if (!isPlayer() || !ONLINE_URL) return;
+    if (!ONLINE_URL || !myRef) return;                // everyone with an account has a bank account
     var now = Date.now(); if (!force && now - vaultFetched < 15000) return; vaultFetched = now;
     api('/api/vault').then(function (r) { return r.json(); }).then(function (d) {
       if (d && typeof d.balance === 'number') { vaultBal = d.balance; bankLedger = Array.isArray(d.ledger) ? d.ledger : []; renderVault(); }
@@ -2623,10 +2623,11 @@ var Core = (function () {
   }
   function renderVault() {
     var pr = canSit(), me = pr ? mySeat() : null;
-    $('vaultPanel').hidden = !(pr && vaultBal !== null);
-    $('vaultInfo').textContent = 'Your bank account: ' + Core.fmt(vaultBal || 0) + '. Every chip you play with comes out of it, and goes back in when you leave the table or save chips.';
-    var LT = { grant: 'Welcome grant', mint: 'Added by admin', buyin: 'To a table', cashout: 'From a table', trivia: 'Trivia winnings', dealercut: 'Dealer cut' };
-    $('bankLedger').textContent = bankLedger.slice(0, 8).map(function (e) {
+    $('vaultPanel').hidden = vaultBal === null;
+    $('vaultInfo').textContent = 'Your bank account: ' + Core.fmt(vaultBal || 0) + '. ' + (me ? 'Chips on your seat go back here when you leave the table.' : 'Every chip you play with comes out of it: take a seat at an online table to play.');
+    $('vaultAmt').hidden = !me;
+    var LT = { grant: 'Welcome grant', mint: 'Added by admin', buyin: 'To a table', cashout: 'From a table', trivia: 'Trivia winnings', dealercut: 'Dealer cut', fee: 'Bank fee' };
+    $('bankLedger').textContent = bankLedger.slice(0, 15).map(function (e) {
       return new Date(e.t).toLocaleDateString() + '  ' + (LT[e.type] || e.type) + '  ' + (e.amount > 0 ? '+' : '-') + Core.fmt(Math.abs(e.amount)) + '  (balance ' + Core.fmt(e.balance) + ')';
     }).join('\n');
     $('vaultSave').hidden = !me; $('vaultTake').hidden = !me;
@@ -3040,6 +3041,7 @@ var Core = (function () {
       setOnlineMsg(res.ok ? (cents ? 'Max buy-in is now ' + Core.fmt(cents) + '.' : 'No max buy-in.') : res.error, res.ok);
     } finally { busy = false; }
   });
+  $('inviteBtn2').addEventListener('click', function (e) { e.preventDefault(); $('inviteBtn').click(); });
   $('inviteBtn').addEventListener('click', function (e) {
     e.preventDefault();
     var base = typeof location !== 'undefined' ? String(location.href).split('#')[0].split('?')[0] : '';
