@@ -2070,7 +2070,7 @@ var Core = (function () {
           var dbl = el('button', 'btn-ghost', 'Double down'); dbl.type = 'button'; dbl.setAttribute('data-action', 'dbl');
           drow.appendChild(dbl); card.appendChild(drow);
         }
-      } else if (ctl && auto && (!mine || (Core.state.deal && Core.state.deal.phase !== 'betting'))) {
+      } else if (ctl && auto && (!mine || (Core.state.deal && Core.state.deal.phase !== 'betting' && Core.state.deal.phase !== 'results'))) {
         if (mine) card.appendChild(el('div', 'sub', p.out ? 'Sitting out. Sit back in to play.' : 'Wagers open again after the results.'));
         if (mine && p.out) { var so2 = el('button', 'btn-ghost mt', 'Sit back in'); so2.type = 'button'; so2.setAttribute('data-action', 'sitout'); so2.setAttribute('data-out', '0'); card.appendChild(so2); }
       } else if (ctl && rmode) {
@@ -2342,17 +2342,16 @@ var Core = (function () {
     var until = D.phase === 'acting' ? (me && me.until ? me.until : 0) : D.deadline;
     var bar = el('div', 'rbar'), left = el('div');
     left.appendChild(el('div', 'big', 'Round ' + t.round.n + ' · ' + title));
-    left.appendChild(el('div', 'sub2', 'Online dealer · stands on all 17 · blackjack pays 3:2 · split once'));
+    left.appendChild(el('div', 'sub2', 'Online dealer · stands on all 17 · blackjack pays 3:2 · split once · the table closes after 5 minutes with nobody playing'));
     left.appendChild(el('div', 'sub2', (casinoPot === null ? '' : 'Casino pot ' + Core.fmt(casinoPot) + ' · ') + 'Max bet ' + Core.fmt(t.maxBet || 0)));
     bar.appendChild(left);
-    var tm = el('div', 'big timer'); tm.id = 'dealTimer'; tm.setAttribute('data-until', String(until || 0)); bar.appendChild(tm);
     box.appendChild(bar);
     var dz = el('div', 'dealerbox');
     dz.appendChild(el('div', 'sub', 'Dealer' + (D.cards.length && !D.hole ? ' · ' + handTot(D.cards).total + (D.dealerBJ ? ' blackjack' : '') : '')));
     var cs = el('div', 'dkcards');
     D.cards.forEach(function (c) { cs.appendChild(cardEl(c)); });
     if (D.hole) cs.appendChild(cardEl(0, true));
-    if (!D.cards.length && !D.hole) cs.appendChild(el('div', 'sub', t.players.length ? 'Dealing once every wager is in, or when the timer ends.' : 'Waiting for players to take a seat.'));
+    if (!D.cards.length && !D.hole) cs.appendChild(el('div', 'sub', t.players.length ? 'There are no clocks: the cards are dealt as soon as every seated player has bet (or sits out).' : 'Waiting for players to take a seat.'));
     dz.appendChild(cs); box.appendChild(dz);
     t.players.forEach(function (p) {
       var mineSeat = !!myRef && p.owner === myRef, row = el('div', 'dseat' + (mineSeat ? ' me' : ''));
@@ -2367,6 +2366,10 @@ var Core = (function () {
         row.appendChild(info);
       });
       if (p.ins > 0) row.appendChild(el('div', 'sub', 'Insurance ' + Core.fmt(p.ins)));
+      if (mineSeat && D.phase === 'results') {
+        var nb = el('button', 'btn-add', 'Next round'); nb.type = 'button'; nb.setAttribute('data-d', 'next'); nb.setAttribute('data-pid', p.id);
+        var nbar = el('div', 'actbar'); nbar.appendChild(nb); row.appendChild(nbar);
+      }
       if (mineSeat && D.phase === 'insurance' && p.hands.length && !p.insDone) {
         var side = Math.floor(p.hands[0].bet / 2), ab = el('div', 'actbar');
         [['1', 'Insure ' + Core.fmt(side), 'btn-add'], ['0', 'No thanks', 'btn-ghost']].forEach(function (o) {

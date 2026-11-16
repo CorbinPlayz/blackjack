@@ -5,6 +5,7 @@
 const CODE_CHARS = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789'; // no 0/O/1/I
 const MAX_BODY = 200 * 1024;
 const ROOM_TTL_MS = 24 * 60 * 60 * 1000;
+const IDLE_CLOSE_MS = 5 * 60 * 1000;        // an online dealer table where nobody has played for 5 minutes closes and cashes everybody out
 
 const CORS = {
   'Access-Control-Allow-Origin': '*',
@@ -89,7 +90,7 @@ export function advance(t, secret, now, rand) {
     const dbj = isBlackjack([D.cards[0], secret.hole]);
     t.players.forEach(p => {
       p.hands.forEach(h => { h.bj = isBlackjack(h.cards); h.done = dbj || h.bj; });
-      p.until = p.hands.some(h => !h.done) ? now + ACT_MS : 0;
+      p.until = 0;                                   // no clocks: the table waits for everyone
     });
     D.phase = 'acting';
   };
@@ -103,7 +104,7 @@ export function advance(t, secret, now, rand) {
     secret.hole = draw(); D.hole = true;
     if (cardValue(D.cards[0]) === 11) {              // an ace shows: offer insurance
       bettors.forEach(p => { const side = Math.floor(p.hands[0].bet / 2); p.insDone = !(side > 0 && p.balance - p.hand >= side); });
-      D.phase = 'insurance'; D.deadline = now + INS_MS;
+      D.phase = 'insurance'; D.deadline = 0;
     } else afterInsurance();
   };
   const settle = () => {
@@ -133,7 +134,7 @@ export function advance(t, secret, now, rand) {
       p.hand = 0; p.until = 0;
       if (p.bet > p.balance) p.bet = p.balance;
     });
-    D.phase = 'results'; D.deadline = now + RESULT_MS;
+    D.phase = 'results'; D.deadline = 0; D.next = false;      // the results stay up until a player presses Next round (or places a bet)
   };
   const dealerPlay = () => {
     D.cards.push(secret.hole); secret.hole = -1; D.hole = false;
@@ -146,23 +147,20 @@ export function advance(t, secret, now, rand) {
     let moved = false;
     if (D.phase === 'betting') {
       if (!D.startedAt) {
-        D.startedAt = now; D.deadline = now + BET_MS; moved = true;
+        D.startedAt = now; D.deadline = 0; moved = true;
         if (t.settings.autoBet) t.players.forEach(p => { if (!p.out && p.last > 0 && p.balance > 0 && !(p.bet > 0)) p.bet = Math.min(p.last, p.balance, t.maxBet); });
       } else {
         const el = eligible(), bet = el.filter(p => p.bet > 0 && p.bet <= p.balance);
-        if (bet.length && ((bet.length === el.length && now >= D.startedAt + MIN_BET_MS) || now >= D.deadline)) { deal(bet); moved = true; }
+        if (bet.length && bet.length === el.length) { deal(bet); moved = true; }      // everyone who can play has locked in a wager
       }
     } else if (D.phase === 'insurance') {
       const waiting = t.players.filter(p => p.hands.length && !p.insDone);
-      if (!waiting.length || now >= D.deadline) { waiting.forEach(p => { p.insDone = true; }); afterInsurance(); moved = true; }
+      if (!waiting.length) { afterInsurance(); moved = true; }
     } else if (D.phase === 'acting') {
-      t.players.forEach(p => {
-        if (p.hands.some(h => !h.done) && p.until && now >= p.until) { p.hands.forEach(h => { h.done = true; }); p.idle += 1; p.until = 0; moved = true; }   // too slow: stand
-      });
       if (!t.players.some(p => p.hands.some(h => !h.done))) { dealerPlay(); moved = true; }
-    } else if (D.phase === 'results' && now >= D.deadline) {
+    } else if (D.phase === 'results' && D.next) {
       t.players.forEach(p => { p.hands = []; p.ins = 0; p.insDone = false; if (p.idle >= IDLE_LIMIT) { p.out = true; p.idle = 0; p.bet = 0; } });   // asleep for two rounds: sit out
-      D.cards = []; D.hole = false; D.dealerBJ = false; D.phase = 'betting'; D.startedAt = 0; D.deadline = 0; t.round.n += 1; moved = true;
+      D.cards = []; D.hole = false; D.dealerBJ = false; D.phase = 'betting'; D.startedAt = 0; D.deadline = 0; D.next = false; t.round.n += 1; moved = true;
     }
     if (!moved) break;
     changed = true;
@@ -212,7 +210,7 @@ function playerAct(t, secret, p, a, now, rand) {
     p.hands.push(h2);
     [h, h2].forEach(x => { if (aces || handTotal(x.cards).total === 21) x.done = true; });   // split aces get one card each
   } else return no('Unknown action.');
-  p.idle = 0; p.until = p.hands.some(x => !x.done) ? now + ACT_MS : 0;
+  p.idle = 0; p.until = 0;
   return { ok: true };
 }
 
@@ -272,7 +270,7 @@ export function normalizeTable(t) {
     funded: Number.isInteger(t.funded) ? t.funded : 0,   // money that came in from bank accounts (net): chips on seats + house always add up to this
     nextId: Math.max(typeof t.nextId === 'number' ? t.nextId : 1, maxId + 1),
     nextHid: Math.max(typeof t.nextHid === 'number' ? t.nextHid : 1, maxHid + 1),
-    deal: { phase: ['betting', 'insurance', 'acting', 'results'].includes(dl.phase) ? dl.phase : 'betting', startedAt: nn(dl.startedAt), deadline: nn(dl.deadline),
+    deal: { phase: ['betting', 'insurance', 'acting', 'results'].includes(dl.phase) ? dl.phase : 'betting', startedAt: nn(dl.startedAt), deadline: nn(dl.deadline), next: dl.next === true,
       cards: (Array.isArray(dl.cards) ? dl.cards : []).filter(isCard).slice(0, 12), hole: dl.hole === true, shoeLeft: nn(dl.shoeLeft), dealerBJ: dl.dealerBJ === true },   // the dealer's PUBLIC cards (the hole card is not here)
     round: { n: Number.isInteger(rd.n) && rd.n > 0 ? rd.n : 1, phase: rd.phase === 'playing' ? 'playing' : 'betting' },
     dealer: typeof t.dealer === 'string' && REF_RE.test(t.dealer) ? t.dealer : '',          // '' = the host deals
@@ -320,6 +318,17 @@ function applyCore(t, actor, a, ctx, ops) {
   if (auto) {
     advance(t, ctx.secret, now, ctx.rand);
     if (['start', 'finish', 'settle', 'insurance', 'undo', 'add', 'dealer_request', 'dealer_cancel', 'dealer_reject', 'dealer_accept', 'dealer_set'].includes(a.type)) return deny('The online dealer runs this table.');
+    if (a.type === 'next') {                         // any seated player can close the results and open the next round
+      if (!t.players.some(mine)) return deny('Take a seat first.');
+      if (t.deal.phase !== 'results') return deny('The round is not over yet.');
+      t.deal.next = true; advance(t, ctx.secret, now, ctx.rand);
+      return { ok: true };
+    }
+    if (a.type === 'bet' && t.deal.phase === 'results' && t.players.some(mine)) {      // wagering for the next round also closes the results
+      const ab = t.settings.autoBet; t.settings.autoBet = false;                      // the wager being placed replaces this player's auto-repeat; the others still get theirs
+      t.deal.next = true; advance(t, ctx.secret, now, ctx.rand); t.settings.autoBet = ab;
+      if (ab) t.players.forEach(q => { if (!mine(q) && !q.out && q.last > 0 && q.balance > 0 && !(q.bet > 0)) q.bet = Math.min(q.last, q.balance, t.maxBet); });
+    }
     if (['hit', 'stand', 'double', 'split', 'insure'].includes(a.type)) {
       const p = find(a.pid);
       if (!p) return deny('Player not found.');
@@ -396,7 +405,6 @@ function applyCore(t, actor, a, ctx, ops) {
       p.bet = a.amount;
       if (auto) {
         p.idle = 0;
-        if (!others && a.amount > 0) t.deal.deadline = Math.max(t.deal.deadline, now + FIRST_BET_MS);   // the first bettor of a round gives the others a moment
         advance(t, ctx.secret, now, ctx.rand);
       }
       return { ok: true, bet: p.bet };
@@ -451,6 +459,7 @@ function applyCore(t, actor, a, ctx, ops) {
       p.out = a.out === true; p.idle = 0;
       if (p.out) p.bet = 0;
       else if (!auto && t.round.phase === 'betting' && !(p.bet > 0) && !dealerSeat(p) && t.settings.autoBet && p.last > 0 && p.balance > 0) p.bet = Math.min(p.last, p.balance);
+      if (auto) advance(t, ctx.secret, now, ctx.rand);      // nobody is waiting on a player who sat out
       return { ok: true };
     }
     case 'settle': {
@@ -607,6 +616,7 @@ function applyCore(t, actor, a, ctx, ops) {
       t.players = t.players.filter(x => x.id !== p.id);
       if (p.owner && t.dealerReq === p.owner) t.dealerReq = '';
       roundOver();
+      if (auto) advance(t, ctx.secret, now, ctx.rand);      // the table no longer waits for the player who left
       return { ok: true };
     }
     case 'reset': {
@@ -947,11 +957,15 @@ export class Room {
     const path = new URL(request.url).pathname;
     const now = Date.now();
     const meta = await this.state.storage.get('meta');
-    const expired = meta && now - meta.updated > ROOM_TTL_MS;
+    let expired = meta && now - meta.updated > ROOM_TTL_MS, idleClosed = false, old0 = null;
+    if (meta && !expired && now - meta.updated > IDLE_CLOSE_MS) {      // nobody has acted for 5 minutes (polling does not count): a table with seated players closes
+      old0 = normalizeTable(await this.state.storage.get('table'));
+      if (old0.settings.auto && old0.players.length) { expired = true; idleClosed = true; }
+    }
     const code = request.headers.get('X-Code') || '';
-    if (expired) {                                   // a closing table pays every seat back into its owner's bank account first
-      const old = normalizeTable(await this.state.storage.get('table'));
-      const back = old.players.filter(p => p.owner && p.balance > 0).map(p => ({ ref: p.owner, delta: p.balance, kind: 'cashout', note: 'Table closed' }));
+    if (expired) {                                   // a closing table pays every seat back into its owner's bank account first (a hand in play is void: the wager was never taken from the seat)
+      const old = old0 || normalizeTable(await this.state.storage.get('table'));
+      const back = old.players.filter(p => p.owner && p.balance > 0).map(p => ({ ref: p.owner, delta: p.balance, kind: 'cashout', note: idleClosed ? 'Table closed: nobody played for 5 minutes' : 'Table closed' }));
       const pend = old.house - old.hs;               // house chips not yet in the casino pot
       if (back.length || pend || old.settings.auto) {   // online dealer table: the rest goes to the pot and the host may earn the dealer cut; a friendly table's house leaves the supply
         const body = { opId: 'exp:' + code + ':' + meta.updated, ops: back };
@@ -970,7 +984,7 @@ export class Room {
     if (path === '/init') {
       if (live) return json({ error: 'taken' }, 409);
       const { token } = await request.json();
-      await this.state.storage.put('meta', { token, v: 0, updated: now });
+      await this.state.storage.put('meta', { token, v: 0, updated: now, born: now });
       let ci = {}; try { ci = await (await reg(this.env, '/casino/get', {})).json(); } catch (e) { ci = {}; }
       const hostRef = REF_RE.test(request.headers.get('X-Ref') || '') ? request.headers.get('X-Ref') : '';
       await this.state.storage.put('table', { players: [], history: [], hostRef, potStart: ci.pot || 0, epoch: ci.epoch || 0, maxBet: maxBetFor(ci.pot || 0) || DEFAULT_MAX_BET, settings: { auto: true, rounds: true } });   // new tables are online dealer tables
@@ -996,14 +1010,14 @@ export class Room {
       if (!res.ok) return json({ ok: false, error: res.error }, 400);
       let vaultBalance;
       {                                                // accounts and the casino pot are updated first (all or nothing, once per table version): if the bank refuses, the table is not saved
-        const sy = await this.bankSync(table, code + ':' + (live.v + 1), res.ops || []);
+        const sy = await this.bankSync(table, code + '.' + (live.born || 0) + ':' + (live.v + 1), res.ops || []);
         if (!sy.ok) return json({ ok: false, error: 'The bank could not complete that. Nothing was changed.' }, 400);
         if (ref && typeof sy.balances[ref] === 'number') vaultBalance = sy.balances[ref];
       }
       const v = live.v + 1;
       await this.state.storage.put('table', table);
       await this.state.storage.put('secret', secret);
-      await this.state.storage.put('meta', { token: live.token, v, updated: now });
+      await this.state.storage.put('meta', { token: live.token, v, updated: now, born: live.born });
       return json({ ok: true, v, t: now, state: table, delta: res.delta, balance: res.balance, entry: res.entry, playerFound: res.playerFound, fee: res.fee, hand: res.hand, n: res.n, skipped: res.skipped, vaultBalance });
     }
 
@@ -1013,11 +1027,11 @@ export class Room {
       const secret = normalizeSecret(await this.state.storage.get('secret'));
       if (!advance(table, secret, now)) return json({ v: live.v, state: table, t: now });      // the online dealer's clock moved on: save it (without keeping an idle table alive)
       const v = live.v + 1;
-      const sy = await this.bankSync(table, code + ':' + v, []);
+      const sy = await this.bankSync(table, code + '.' + (live.born || 0) + ':' + v, []);
       if (!sy.ok) return json({ v: live.v, state: normalizeTable(await this.state.storage.get('table')), t: now });   // the bank is busy: show the old state, the clock moves on next time
       await this.state.storage.put('table', table);
       await this.state.storage.put('secret', secret);
-      await this.state.storage.put('meta', { token: live.token, v, updated: live.updated });
+      await this.state.storage.put('meta', { token: live.token, v, updated: live.updated, born: live.born });
       return json({ v, state: table, t: now });
     }
 
@@ -1035,7 +1049,7 @@ export class Room {
     const cur = normalizeTable(await this.state.storage.get('table'));
     seed.hostRef = cur.hostRef; seed.potStart = cur.potStart; seed.epoch = cur.epoch; seed.maxBet = cur.maxBet;
     await this.state.storage.put('table', seed);
-    await this.state.storage.put('meta', { token: live.token, v: 1, updated: now });
+    await this.state.storage.put('meta', { token: live.token, v: 1, updated: now, born: live.born });
     return json({ ok: true, v: 1 });
   }
 }

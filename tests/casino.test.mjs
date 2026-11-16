@@ -35,6 +35,8 @@ ok(conserved(), 'invariant: accounts + seats + pot == supply');
 await call('/bank/mint', { ref: ref.B, amount: 90000000, note: 'test' });   // $900,000 + the $1,000 grant (the grant is created by the mint call below via /vault/get)
 let r = await act('CAS01', 'B', { type: 'seat', buyin: 600000 });
 ok(r.ok, 'a player buys in for $6,000');
+r = await act('CAS01', 'C', { type: 'seat', buyin: 20000 });   // a second player who has not bet yet, so the dealer waits (no clocks) and the wagers below are not dealt at once
+ok(r.ok, 'a second player sits down');
 r = await act('CAS01', 'B', { type: 'bet', pid: 1, amount: 250000 });
 ok(r._s === 400 && /max bet is \$2,000/i.test(r.error), 'a bet above 2% of the pot is refused: ' + r.error);
 r = await act('CAS01', 'B', { type: 'bet', pid: 1, amount: 200000 });
@@ -51,6 +53,7 @@ c.pot = was; regSt.m.set('casino', c); regSt.m.set('supply', supply() + (was - 5
 ok(conserved(), 'invariant still holds');
 
 // ---- real rounds move money through the pot ----
+r = await act('CAS01', 'C', { type: 'sitout', pid: 2, out: true }); assert.ok(r.ok);
 let moved = 0;
 for (let i = 0; i < 6; i++) {
   const before = { seat: table('CAS01').players[0].balance, pot: pot() };
@@ -93,7 +96,7 @@ ok(dup.ok, 'replaying the same pot payment is answered from the log');
 const mkCutTable = async (code, hostKey, potStart, profit) => {
   const X = await init(code, hostKey);
   const t = table(code); t.potStart = potStart; t.epoch = 1; room(code).st.m.set('table', t);
-  r = await act(code, 'C', { type: 'seat', buyin: 50000 });
+  r = await act(code, 'C', { type: 'seat', buyin: 20000 });
   const t2 = table(code); t2.players[0].balance -= profit; t2.house += profit; room(code).st.m.set('table', t2);   // the casino "won" this much at the table
   return X;
 };
@@ -126,7 +129,7 @@ ok((await bal('A')) === a3 && conserved(), 'no cut when the casino lost money at
   let rr = await hostAct({ type: 'seat', buyin: 10000 });
   ok(rr.ok && (await bal('A')) === a0 - 10000 && table('CAS20').players[0].owner === ref.A, 'the host takes a seat at their own online dealer table, paid from their bank account');
   rr = await hostAct({ type: 'bet', pid: 1, amount: 5000 });
-  ok(rr.ok && table('CAS20').players[0].bet === 5000, 'and can place a wager like any player');
+  ok(rr.ok && table('CAS20').players[0].hands.length === 1, 'and can place a wager like any player (the hand is dealt at once)');
   rr = await hostAct({ type: 'settle', pid: 1, outcome: 'win' });
   ok(rr._s === 400, 'but still cannot settle their own hand (the server dealer does that)');
   ok(conserved(), 'invariant holds');

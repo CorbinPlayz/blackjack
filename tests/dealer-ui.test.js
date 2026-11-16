@@ -59,8 +59,7 @@ const shots = process.env.SHOTS || '';
   // wager
   await p.waitForTimeout(500);
   await p.locator('button[data-action="qbet"]').first().click(); await p.waitForTimeout(800);
-  ok(/wager/i.test(await p.locator('#roundPanel').innerText()), 'the locked-in wager shows on the table');
-  ok((await p.locator('#dealTimer').innerText()).length > 0, 'a countdown is shown');
+  ok(await p.locator('#dealTimer').count() === 0, 'there is no countdown any more');
   await shot('2-betting');
   // the dealer deals by itself once everyone has bet
   await p.waitForFunction(() => document.querySelectorAll('#roundPanel .dkc').length >= 3, null, { timeout: 30000 });
@@ -82,9 +81,12 @@ const shots = process.env.SHOTS || '';
   await shot('5-results');
   const after = await call('GET', '/api/rooms/' + code, devP);
   ok(after.state.deal.cards.length >= 2 && !JSON.stringify(after).includes('"shoe"'), 'what the page was sent has no shoe');
-  // by itself, the next round opens
-  await p.waitForFunction(() => /place your wagers/i.test(document.getElementById('roundPanel').innerText), null, { timeout: 20000 });
-  ok(true, 'the next round opens by itself after the results');
+  // the results stay up (no clock) until the player moves on
+  await p.waitForTimeout(4000);
+  ok(await p.locator('#roundPanel .chip-res').count() >= 1 && await p.locator('button[data-d="next"]').isVisible(), 'the results stay up with a Next round button (no clock)');
+  await p.locator('button[data-d="next"]').click();
+  await p.waitForFunction(() => /place your wagers|play your hands|insurance/i.test(document.getElementById('roundPanel').innerText), null, { timeout: 10000 });
+  ok(true, 'Next round opens the next round');
   ok(!errs.length, 'no page errors: ' + errs.join(' | '));
   await b.close();
   console.log('ALL', n, 'DEALER UI CHECKS PASSED');

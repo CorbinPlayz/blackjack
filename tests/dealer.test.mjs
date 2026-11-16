@@ -60,9 +60,10 @@ const split = (g, i = 0) => act(g, me(g, i).owner, { type: 'split', pid: me(g, i
   stand(g);
   ok(g.t.deal.phase === 'results' && g.t.deal.cards.length === 2 && g.t.deal.hole === false, 'when everyone is done the hole card is revealed');
   ok(me(g).balance === 101000 && me(g).hand === 0 && g.t.house === -1000 && g.t.history.at(-1).outcome === 'win', 'win pays 1:1, is logged, and comes out of the house');
-  tick(g, 7000); ok(g.t.deal.phase === 'betting' && g.t.round.n === 2 && me(g).hands.length === 0, 'results show for 7s, then the next round opens by itself');
-  ok(me(g).bet === 1000, 'auto-repeat puts last round\'s wager back in');
-  tick(g, 6000); ok(g.t.deal.phase === 'acting' || g.t.deal.phase === 'insurance' || g.t.deal.phase === 'results', 'and with every wager in, the next hand is dealt automatically');
+  tick(g, 3600000); ok(g.t.deal.phase === 'results' && g.t.round.n === 1, 'there is no clock: the results stay up until a player moves on');
+  ok(act(g, 'nobody', { type: 'next' }).ok === false, 'a stranger cannot move the table on');
+  ok(act(g, A, { type: 'next' }).ok && g.t.round.n === 2 && me(g).last === 1000, 'a seated player presses Next round: auto-repeat puts last round\'s wager back in');
+  ok(['acting', 'insurance', 'results'].includes(g.t.deal.phase) && g.t.deal.phase !== 'betting', 'and with every wager in, the next hand is dealt straight away');
 }
 // ---------- blackjack 3:2, dealer does not draw ----------
 {
@@ -153,8 +154,9 @@ const split = (g, i = 0) => act(g, me(g, i).owner, { type: 'split', pid: me(g, i
   ok(act(g, A, { type: 'insure', pid: 1, take: false }).ok && g.t.deal.phase === 'results' && me(g).hands[0].res === 'push' && me(g).balance === 100000, 'player blackjack vs dealer blackjack pushes');
 }
 {
-  const g = mk(); round(g, hand('K', 'A', 7, 9), [1000]); tick(g, 11000);
-  ok(g.t.deal.phase === 'acting' && me(g).ins === 0, 'insurance not answered in 10s is declined');
+  const g = mk(); round(g, hand('K', 'A', 7, 9), [1000]); tick(g, 3600000);
+  ok(g.t.deal.phase === 'insurance' && me(g).ins === 0, 'insurance waits for the answer (no clock)');
+  ok(act(g, A, { type: 'insure', pid: 1, take: false }).ok && g.t.deal.phase === 'acting', 'declining insurance moves the hand on');
 }
 {
   const g = mk([A], 1200); round(g, hand('K', 'A', 7, 9), [1000]);
@@ -164,28 +166,20 @@ const split = (g, i = 0) => act(g, me(g, i).owner, { type: 'split', pid: me(g, i
   const g = mk(); round(g, hand('K', 10, 7, 'A'), [1000]);   // 10 up, A hole: peeked at once
   ok(g.t.deal.phase === 'results' && g.t.deal.dealerBJ && me(g).balance === 99000, 'a ten up with an ace in the hole is found by the peek: the player loses just the wager');
 }
-// ---------- timers ----------
+// ---------- no clocks ----------
 {
   const g = mk(); round(g, hand('K', 9, 6, 7), [1000]);
-  tick(g, 14000); ok(g.t.deal.phase === 'acting', 'still waiting at 14s');
-  tick(g, 2000); ok(g.t.deal.phase === 'results' && me(g).hands[0].done && me(g).idle === 1, 'no decision in 15s: the dealer stands for you');
-}
-{
-  const g = mk(); round(g, hand('K', 9, 2, 7), [1000]); tick(g, 5000); hit(g); tick(g, 11000);
-  ok(g.t.deal.phase === 'acting', 'acting restarts the 15s clock');
-}
-{
-  const g = mk(); round(g, hand('K', 9, 6, 7), [1000]);        // the player bets once, then falls asleep
-  tick(g, 16000); ok(me(g).idle === 1, 'round 1: auto-stood (idle 1)');
-  tick(g, 8000); rig(g, hand('K', 9, 6, 7)); tick(g, 7000); tick(g, 16000); ok(me(g).idle === 2 || me(g).out, 'round 2: auto-stood again (idle 2)');
-  tick(g, 8000);
-  ok(me(g).out === true, 'two rounds of auto-standing in a row sit the player out (no AFK bleeding)');
+  tick(g, 86400000); ok(g.t.deal.phase === 'acting' && !me(g).hands[0].done && me(g).until === 0, 'the table waits for a hand to be played, however long it takes (no auto-stand)');
 }
 {
   const g = mk([A, B]); rig(g, hand('K', 'Q', 9, 7, 8, 6));
-  act(g, A, { type: 'bet', pid: 1, amount: 1000 }); tick(g, 7000);
-  ok(g.t.deal.phase === 'betting', 'one bettor of two: the dealer waits for the other wager');
-  tick(g, 25000); ok(g.t.deal.phase !== 'betting' && me(g, 1).hands.length === 0 && me(g, 0).hands.length === 1, 'at the deadline the round starts without the player who did not bet');
+  act(g, A, { type: 'bet', pid: 1, amount: 1000 }); tick(g, 3600000);
+  ok(g.t.deal.phase === 'betting' && g.t.deal.deadline === 0, 'one bettor of two: the dealer waits for the other wager, with no deadline');
+  ok(act(g, B, { type: 'sitout', pid: 2, out: true }).ok && g.t.deal.phase !== 'betting' && me(g, 1).hands.length === 0 && me(g, 0).hands.length === 1, 'sitting out lets the round start without that player');
+}
+{
+  const g = mk(); round(g, hand('K', 8, 'Q', 10), [1000]); stand(g);
+  ok(act(g, A, { type: 'bet', pid: 1, amount: 500 }).ok && g.t.round.n === 2 && g.t.deal.phase !== 'results', 'placing a wager during the results opens the next round');
 }
 // ---------- who may do what ----------
 {
@@ -252,7 +246,7 @@ const v1 = st.v; ok((await gx()).v === v1, 'polling an unchanged table does not 
 // play the live round out through the API, then check the bank is untouched by settling
 for (let i = 0; i < 40; i++) { st = await gx(); if (st.state.deal.phase === 'results') break; if (st.state.deal.phase === 'insurance') { await rx('A', { type: 'insure', pid: 1, take: false }); await rx('B', { type: 'insure', pid: 2, take: false }); } else { await rx('A', { type: 'stand', pid: 1 }); await rx('B', { type: 'stand', pid: 2 }); } clock += 1000; }
 st = await gx(); ok(st.state.deal.phase === 'results' && st.state.deal.cards.length >= 2 && st.state.deal.hole === false, 'a round played through the API reaches results with the hole card shown');
-const sum = () => { let s = 0; for (const [k, v] of regSt.m) if (k.startsWith('v:')) s += v; const t = roomSt.m.get('table'); return s + t.players.reduce((a, p) => a + p.balance, 0) + (t.house - t.hs) + (regSt.m.get('casino') || { pot: 0 }).pot; };   // house chips already in the casino pot (hs) are counted in the pot
+const sum = () => { let s = 0; for (const [k, v] of regSt.m) if (k.startsWith('v:')) s += v; const t = roomSt.m.get('table') || { players: [], house: 0, hs: 0 }; return s + t.players.reduce((a, p) => a + p.balance, 0) + ((t.house || 0) - (t.hs || 0)) + (regSt.m.get('casino') || { pot: 0 }).pot; };   // house chips already in the casino pot (hs) are counted in the pot
 ok(sum() === regSt.m.get('supply'), 'accounts + seats + house still equal the money supply after a dealt round');
 // idle table does not stay alive forever through polling
 const meta0 = roomSt.m.get('meta').updated; clock += 60000; await gx(); clock += 60000; await gx();
@@ -266,6 +260,7 @@ st = await gx(); ok(st.state.players[0].bet === 100 && st.state.players[1].bet =
   let seed = 77; const rnd = () => (seed = (seed * 1664525 + 1013904223) >>> 0) / 4294967296; const ri = (a, b) => a + Math.floor(rnd() * (b - a + 1));
   let acc = 0;
   for (let i = 0; i < 2500; i++) {
+    if (!roomSt.m.has('table')) await room.fetch(new Request('https://room/init', { method: 'POST', headers: { 'X-Ref': ref.A }, body: JSON.stringify({ token: 'tok' }) }));   // an idle table closed (and cashed everybody out): open it again
     const who = ['A', 'B', 'C', 'H'][ri(0, 3)], pid = ri(1, 4), k = ri(0, 13);
     const a = [{ type: 'seat', name: 'X' + ri(1, 9), buyin: [100, 5000, 20000, 90000][ri(0, 3)] }, { type: 'bet', pid, amount: [0, 100, 1000, 5000, 50000][ri(0, 4)] },
       { type: 'hit', pid }, { type: 'stand', pid }, { type: 'double', pid }, { type: 'split', pid }, { type: 'insure', pid, take: rnd() < .5 }, { type: 'rebuy', pid, amount: [100, 3000][ri(0, 1)] },
@@ -273,11 +268,26 @@ st = await gx(); ok(st.state.players[0].bet === 100 && st.state.players[1].bet =
     const r = await rx(who, a); if (r.ok) acc++;
     clock += [0, 700, 4000, 9000, 20000][ri(0, 4)];
     if (rnd() < .3) await gx();
-    assert.ok(sum() === regSt.m.get('supply'), 'CONSERVATION BROKEN after ' + JSON.stringify([who, a]));
-    const t = roomSt.m.get('table'); t.players.forEach(p => assert.ok(p.balance >= 0 && p.hand <= p.balance, 'bad seat ' + JSON.stringify(p)));
+    assert.ok(sum() === regSt.m.get('supply'), 'CONSERVATION BROKEN after ' + JSON.stringify([who, a]) + ' diff ' + (sum() - regSt.m.get('supply')) + ' table ' + JSON.stringify(roomSt.m.get('table')) + ' r ' + JSON.stringify(r));
+    const t = roomSt.m.get('table') || { players: [] }; t.players.forEach(p => assert.ok(p.balance >= 0 && p.hand <= p.balance, 'bad seat ' + JSON.stringify(p)));
     for (const [kk, v] of regSt.m) if (kk.startsWith('v:')) assert.ok(v >= 0, 'negative account');
   }
   ok(true, 'randomized through the real Room and bank: 2,500 actions (' + acc + ' accepted) with clock jumps: accounts + seats + house == supply every time');
+}
+// nobody plays for 5 minutes: the table closes and everybody is cashed out
+{
+  if (!roomSt.m.has('table')) await room.fetch(new Request('https://room/init', { method: 'POST', headers: { 'X-Ref': ref.A }, body: JSON.stringify({ token: 'tok' }) }));
+  await rx('A', { type: 'seat', name: 'Ann', buyin: 5000 }); await rx('B', { type: 'seat', name: 'Bob', buyin: 7000 });
+  const accBefore = (() => { let x = 0; for (const [k, v] of regSt.m) if (k.startsWith('v:')) x += v; return x; })();
+  const seated = roomSt.m.get('table').players.reduce((a, p) => a + p.balance, 0);
+  { const mm = roomSt.m.get('meta'); mm.updated = clock; roomSt.m.set('meta', mm); }      // somebody just played
+  clock += 4 * 60000; await gx(); ok(roomSt.m.has('table'), 'after 4 quiet minutes the table is still open (polling does not count as playing)');
+  clock += 2 * 60000; const r = await room.fetch(new Request('https://room/state', { headers: { 'X-Code': 'TST01' } }));
+  ok(!roomSt.m.has('table'), 'after 5 quiet minutes the table closes');
+  let accAfter = 0; for (const [k, v] of regSt.m) if (k.startsWith('v:')) accAfter += v;
+  ok(accAfter >= accBefore + seated && accAfter + (regSt.m.get('casino') || { pot: 0 }).pot === regSt.m.get('supply'), 'everyone was cashed out to their bank accounts: ' + seated + ' cents came back (plus any dealer cut) and nothing was lost');
+  const t2 = await room.fetch(new Request('https://room/init', { method: 'POST', headers: { 'X-Ref': ref.A }, body: JSON.stringify({ token: 'tok2' }) }));
+  ok(t2.status === 200 || t2.status === 201 || t2.ok, 'a new table can open on the same code');
 }
 Date.now = realNow;
 console.log('ALL', n, 'DEALER CHECKS PASSED');
