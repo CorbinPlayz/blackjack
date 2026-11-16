@@ -387,6 +387,11 @@
 </section>
 
 <section class="tab" id="tab-board" data-tab="board" hidden>
+<div class="panel" id="lbPanel" hidden>
+  <h2>Leaderboard · net worth</h2>
+  <div class="online-status">Bank account plus your own chips on a table. The right-hand number is your profit: free money (welcome grant, admin gifts, trivia) and dealer cuts do not count, and the casino's money never does.</div>
+  <div id="lbRows"></div>
+</div>
 <div class="panel" id="standingsPanel" hidden>
   <h2>Standings · net vs. buy-in</h2>
   <div id="standings"></div>
@@ -1994,6 +1999,7 @@ var Core = (function () {
     renderTabs();
     if (n === 'admin') adminLoad();
     if (n === 'me') refreshVault(true);
+    if (n === 'board') loadBoard(true);
     try { window.scrollTo(0, 0); } catch (e) {}
   }
   $('nav').addEventListener('click', function (e) {
@@ -2042,6 +2048,27 @@ var Core = (function () {
     if (focusId && $(focusId)) { try { $(focusId).focus(); } catch (e) {} }
   }
 
+  /* ---------- leaderboard (net worth of every player; the server adds it up) ---------- */
+  var lbAt = 0;
+  function loadBoard(force) {
+    if (!ONLINE_URL || !myRef) return;
+    var now = Date.now(); if (!force && now - lbAt < 20000) return; lbAt = now;
+    api('/api/leaderboard').then(function (r) { return r.ok ? r.json() : null; }).then(function (d) {
+      if (!d || !Array.isArray(d.rows)) return;
+      var box = $('lbRows'); box.innerHTML = ''; $('lbPanel').hidden = !d.rows.length;
+      d.rows.forEach(function (r) {
+        var row = el('div', 'hist-row'), who = el('div', 'who');
+        var nm = el('div', null, r.rank + '. ' + r.name);
+        if (r.you) nm.appendChild(el('span', 'badge', 'YOU'));
+        if (r.rank === 1) nm.appendChild(el('span', 'crown', '👑'));
+        who.appendChild(nm); who.appendChild(el('div', 'what', 'Net worth ' + Core.fmt(r.net)));
+        row.appendChild(who);
+        row.appendChild(el('div', 'amt ' + (r.profit > 0 ? 'pos' : r.profit < 0 ? 'neg' : 'neu'), r.profit === 0 ? 'Even' : signed(r.profit)));
+        box.appendChild(row);
+      });
+    }).catch(function () {});
+  }
+  setInterval(function () { if (curTab === 'board') loadBoard(false); }, 20000);
   function renderStandings() {
     var ps = Core.state.players.slice();
     $('standingsPanel').hidden = ps.length < 2;

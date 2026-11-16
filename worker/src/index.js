@@ -264,6 +264,7 @@ export function normalizeTable(t) {
   return {
     players, history,
     house: Number.isInteger(t.house) ? t.house : 0,       // chips the table's house holds (fees, player losses); negative = the house owes (until the casino pot exists)
+    sn: typeof t.sn === 'string' ? t.sn.slice(0, 2000) : '',     // what the bank last heard about the chips on the seats (for the leaderboard)
     hs: Number.isInteger(t.hs) ? t.hs : 0,               // part of `house` already moved into the casino pot (online dealer tables keep house == hs after every request)
     hostRef: typeof t.hostRef === 'string' && REF_RE.test(t.hostRef) ? t.hostRef : '',   // the account that opened the table: earns the dealer cut
     potStart: Number.isInteger(t.potStart) && t.potStart > 0 ? t.potStart : 0, epoch: Number.isInteger(t.epoch) && t.epoch > 0 ? t.epoch : 0,   // casino pot and casino number when the shift began
@@ -880,6 +881,12 @@ export default {
       return withCors(await reg(env, '/bank/get', { ref: me.ref }));
     }
 
+    if (url.pathname === '/api/leaderboard' && request.method === 'GET') {      // net worth ranking: accounts + own chips on tables, never the casino pot
+      const me = await identify(request, env);
+      if (!me.ok) return json({ error: 'not approved' }, 403);
+      const lr = await reg(env, '/leaderboard', { ref: me.ref || '' });
+      return withCors(lr);
+    }
     if (url.pathname === '/api/casino' && request.method === 'GET') {         // the casino pot everyone is playing against
       const me = await identify(request, env);
       if (!me.ok) return json({ error: 'not approved' }, 403);
@@ -943,15 +950,21 @@ export class Room {
   // Account moves and the casino pot, applied together (all or nothing, once per opId). On an online dealer table everything the house won or paid
   // since the last call (house - hs) moves in or out of the casino pot. If the pot cannot cover a payout, the pot pays what is left (it goes broke)
   // and the missing part is taken back from the seats, so no chip is ever created.
-  async bankSync(table, opId, ops) {
+  async bankSync(table, opId, ops, code) {
     const auto = table.settings.auto === true;
     const potDelta = auto ? table.house - table.hs : 0;
-    if (!ops.length && !potDelta) return { ok: true, balances: {} };
+    const map = {}; table.players.forEach(p => { if (p.owner && p.balance > 0) map[p.owner] = (map[p.owner] || 0) + p.balance; });
+    const snap = JSON.stringify(Object.entries(map).sort());
+    const snapChanged = snap !== table.sn;
+    if (!ops.length && !potDelta && !snapChanged) return { ok: true, balances: {} };
     const body = { opId, ops };
     if (potDelta) body.potDelta = potDelta;
+    if (snapChanged && code) body.seats = { code, map };
+    if (!ops.length && !potDelta && !body.seats) return { ok: true, balances: {} };      // nothing the bank needs to hear
     const r = await reg(this.env, '/bank/apply', body);
     if (!r.ok) return { ok: false };
     const j = await r.json();
+    table.sn = snap;
     if (auto) {
       let short = Number.isInteger(j.short) ? j.short : 0, taken = 0;
       if (short > 0) {
@@ -987,12 +1000,12 @@ export class Room {
       const back = old.players.filter(p => p.owner && p.balance > 0).map(p => ({ ref: p.owner, delta: p.balance, kind: 'cashout', note: idleClosed ? 'Table closed: nobody played for 5 minutes' : 'Table closed' }));
       const pend = old.house - old.hs;               // house chips not yet in the casino pot
       if (back.length || pend || old.settings.auto) {   // online dealer table: the rest goes to the pot and the host may earn the dealer cut; a friendly table's house leaves the supply
-        const body = { opId: 'exp:' + code + ':' + meta.updated, ops: back };
+        const body = { opId: 'exp:' + code + ':' + meta.updated, ops: back, seatsClear: code };
         if (old.settings.auto) {
           if (pend) body.potDelta = pend;
           if (old.hostRef) body.cut = { ref: old.hostRef, base: Math.max(0, old.house), potStart: old.potStart, epoch: old.epoch };
         } else if (pend) body.supplyDelta = -pend;
-        if (!body.ops.length && !body.potDelta && !body.supplyDelta && !body.cut) body.skip = true;
+        if (!body.ops.length && !body.potDelta && !body.supplyDelta && !body.cut && !old.players.length) body.skip = true;
         const r = body.skip ? { ok: true } : await reg(this.env, '/bank/apply', body);
         if (!r.ok) return json({ error: 'Try again in a moment.' }, 503);
       }
@@ -1029,7 +1042,7 @@ export class Room {
       if (!res.ok) return json({ ok: false, error: res.error }, 400);
       let vaultBalance;
       {                                                // accounts and the casino pot are updated first (all or nothing, once per table version): if the bank refuses, the table is not saved
-        const sy = await this.bankSync(table, code + '.' + (live.born || 0) + ':' + (live.v + 1), res.ops || []);
+        const sy = await this.bankSync(table, code + '.' + (live.born || 0) + ':' + (live.v + 1), res.ops || [], code);
         if (!sy.ok) return json({ ok: false, error: 'The bank could not complete that. Nothing was changed.' }, 400);
         if (ref && typeof sy.balances[ref] === 'number') vaultBalance = sy.balances[ref];
       }
@@ -1046,7 +1059,7 @@ export class Room {
       const secret = normalizeSecret(await this.state.storage.get('secret'));
       if (!advance(table, secret, now)) return json({ v: live.v, state: table, t: now });      // the online dealer's clock moved on: save it (without keeping an idle table alive)
       const v = live.v + 1;
-      const sy = await this.bankSync(table, code + '.' + (live.born || 0) + ':' + v, []);
+      const sy = await this.bankSync(table, code + '.' + (live.born || 0) + ':' + v, [], code);
       if (!sy.ok) return json({ v: live.v, state: normalizeTable(await this.state.storage.get('table')), t: now });   // the bank is busy: show the old state, the clock moves on next time
       await this.state.storage.put('table', table);
       await this.state.storage.put('secret', secret);
@@ -1077,9 +1090,19 @@ export class Room {
 // status: 'pending' (asked) -> 'approved' | 'blocked'. 'remove' deletes the record.
 const START_GRANT = 100000;                      // $1,000 in cents, once per account
 const LEDGER_MAX = 100;
+// Running totals per account for the leaderboard: `free` = money that was handed out (welcome grant, admin mint, trivia), `cut` = dealer cuts.
+// Profit on the leaderboard = net worth - free - cut, so neither free money nor the dealer's pay counts as winning. First use starts from the saved ledger.
+async function addTotals(s, ref, type, amount, ledger) {
+  if (!['grant', 'mint', 'trivia', 'dealercut'].includes(type)) return;
+  let p = await s.get('p:' + ref);
+  if (!p) { p = { free: 0, cut: 0 }; for (const e of ledger) { if (e.type === 'dealercut') p.cut += e.amount; else if (['grant', 'mint', 'trivia'].includes(e.type)) p.free += e.amount; } }
+  if (type === 'dealercut') p.cut += amount; else p.free += amount;
+  await s.put('p:' + ref, p);
+}
 async function ledgerAdd(s, ref, type, amount, balance, note) {
   const k = 'l:' + ref;
   const l = (await s.get(k)) || [];
+  await addTotals(s, ref, type, amount, l);
   l.push({ t: Date.now(), type, amount, balance, note: String(note || '').slice(0, 60) });
   while (l.length > LEDGER_MAX) l.shift();
   await s.put(k, l);
@@ -1217,6 +1240,24 @@ export class Registry {
       if (!REF_RE.test(String(b.ref || '')) || !(await s.get('r:' + b.ref))) return json({ balance: 0 });
       return json({ balance: await ensureGrant(s, b.ref) });
     }
+    if (path === '/leaderboard') {                   // personal net worth: bank account + own chips on tables. The casino pot is never counted.
+      const onTable = {};
+      for (const m of (await s.list({ prefix: 'ts:' })).values()) for (const [r, v] of Object.entries(m || {})) onTable[r] = (onTable[r] || 0) + v;
+      const rows = [];
+      for (const [k, devId] of (await s.list({ prefix: 'r:' })).entries()) {
+        const ref = k.slice(2);
+        if (!(await s.get('b:' + ref) || {}).granted) continue;
+        const d = (String(devId).startsWith('g:') ? await s.get(devId) : await s.get('d:' + devId)) || {};      // Google accounts live under g:<email>, the owner's device under d:<id>
+        if (d.status !== 'approved') continue;
+        const net = ((await s.get('v:' + ref)) || 0) + (onTable[ref] || 0);
+        const p = (await s.get('p:' + ref)) || null;
+        let free = START_GRANT, cut = 0;
+        if (p) { free = p.free; cut = p.cut; } else { for (const e of (await s.get('l:' + ref)) || []) { if (e.type === 'dealercut') cut += e.amount; else if (e.type === 'mint' || e.type === 'trivia') free += e.amount; } }
+        rows.push({ ref, name: String(d.name || 'Player').slice(0, 30), net, profit: net - free - cut });
+      }
+      rows.sort((x, y) => y.net - x.net);
+      return json({ rows: rows.slice(0, 25).map((r, i) => ({ rank: i + 1, name: r.name, net: r.net, profit: r.profit, you: !!b.ref && r.ref === b.ref })), t: Date.now() });
+    }
     if (path === '/casino/get') { const c = await getCasino(s); return json({ pot: c.pot, epoch: c.epoch, brokeAt: c.brokeAt, locked: c.brokeAt > 0, until: c.brokeAt > 0 ? c.brokeAt + LOCK_MS : 0, t: Date.now() }); }
     if (path === '/bank/apply') {                    // a batch of account moves from a table, all or nothing, applied once per opId
       const ops = Array.isArray(b.ops) ? b.ops : [];
@@ -1224,7 +1265,8 @@ export class Registry {
       const supplyDelta = b.supplyDelta === undefined ? 0 : b.supplyDelta;
       const potDelta = b.potDelta === undefined ? 0 : b.potDelta;
       const cutReq = b.cut && typeof b.cut === 'object' ? b.cut : null;
-      if (!opId || (!ops.length && !supplyDelta && !potDelta && !cutReq) || ops.length > 200 || !Number.isInteger(supplyDelta) || !Number.isInteger(potDelta)) return json({ error: 'bad request' }, 400);
+      const seatsReq = b.seats && typeof b.seats === 'object' && typeof b.seats.code === 'string' && b.seats.code.length <= 12 && b.seats.map && typeof b.seats.map === 'object' ? b.seats : null;   // chips each account holds at a table, for the leaderboard
+      if (!opId || (!ops.length && !supplyDelta && !potDelta && !cutReq && !seatsReq && !b.seatsClear) || ops.length > 200 || !Number.isInteger(supplyDelta) || !Number.isInteger(potDelta)) return json({ error: 'bad request' }, 400);
       const done = await s.get('o:' + opId);
       if (done) return json({ ok: true, dup: true, balances: done.balances, pot: done.pot, short: done.short });
       // the casino pot: pays out at most what it holds (the rest is `short`, the caller takes it back from the seats)
@@ -1260,6 +1302,8 @@ export class Registry {
       }
       await s.put('supply', supply);
       await s.put('casino', c);
+      if (seatsReq) { const m = {}; for (const [r, v] of Object.entries(seatsReq.map)) if (REF_RE.test(r) && Number.isInteger(v) && v > 0) m[r] = v; await s.put('ts:' + seatsReq.code, m); }
+      if (typeof b.seatsClear === 'string' && b.seatsClear.length <= 12) await s.delete('ts:' + b.seatsClear);
       await s.put('o:' + opId, { t: Date.now(), balances: bal, pot: c.pot, short });
       const lastPrune = (await s.get('oprune')) || 0;
       if (Date.now() - lastPrune > 86400000) {

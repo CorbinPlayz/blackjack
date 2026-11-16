@@ -8,6 +8,7 @@ const html = path.resolve(__dirname, '../index.html'); const shots = process.env
   const J = o => ({ status: 200, headers: { 'content-type': 'application/json', 'access-control-allow-origin': '*' }, body: JSON.stringify(o) });
   await p.route('**/api/**', r => { const u = new URL(r.request().url()).pathname;
     if (u === '/api/vault') return r.fulfill(J({ balance: 123456, ledger: [{ t: Date.now(), type: 'grant', amount: 100000, balance: 100000 }, { t: Date.now(), type: 'dealercut', amount: 23456, balance: 123456 }] }));
+    if (u === '/api/leaderboard') return r.fulfill(J({ rows: [{ rank: 1, name: 'Casey', net: 250000, profit: 90000, you: false }, { rank: 2, name: 'Pat', net: 123456, profit: -5000, you: true }] }));
     if (u === '/api/access/status') return r.fulfill(J({ status: 'approved', ref: 'abcd1234', admin: false }));
     return r.fulfill(J({})); });
   await p.route(/accounts\.google|gstatic|googleapis/, r => r.abort());
@@ -23,6 +24,9 @@ const html = path.resolve(__dirname, '../index.html'); const shots = process.env
   ok(/locked/.test(await p.locator('#vaultSave').getAttribute('class')) && (await p.locator('#vaultSave').getAttribute('aria-disabled')) === 'true', 'and grayed out while you have no seat');
   await p.locator('#vaultSave').click({ force: true }); await p.waitForTimeout(100);
   ok(/shake/.test(await p.locator('#vaultSave').getAttribute('class')) && /Take a seat/.test(await p.locator('#vaultMsg').innerText()), 'tapping a grayed-out button shakes it and says why');
+  await p.locator('#nav button[data-go="board"]').click(); await p.waitForTimeout(1200);
+  const lb = await p.locator('#lbPanel').innerText();
+  ok(/casey/i.test(lb) && /\$2,500/.test(lb) && /you/i.test(lb) && /pat/i.test(lb), 'the Board tab lists everyone\'s net worth and marks you');
   if (shots) await p.screenshot({ path: path.join(shots, 'me.png') });
   ok(!errs.length, 'no page errors: ' + errs.join('|'));
   await b.close(); console.log('ALL', n, 'ME TAB CHECKS PASSED');
