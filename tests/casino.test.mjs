@@ -1,5 +1,6 @@
 // Step 4: the casino pot, max bets, the 5% dealer cut, and the pot running dry. Needs ./w.mjs (copy of worker/src/index.js).
-import { Registry, Room } from './w.mjs';
+import { Registry, Room, resetLockCache } from './w.mjs';
+import Front from './w.mjs';
 import assert from 'node:assert';
 let n = 0; const ok = (x, m) => { assert.ok(x, m); n++; console.log('PASS', m); };
 const mkStore = () => { const m = new Map(); return { m, storage: { get: async k => m.get(k), put: async (k, v) => void m.set(k, v), delete: async k => void m.delete(k), deleteAll: async () => m.clear(), list: async ({ prefix }) => new Map([...m].filter(([k]) => k.startsWith(prefix))) } }; };
@@ -133,5 +134,35 @@ ok((await bal('A')) === a3 && conserved(), 'no cut when the casino lost money at
   rr = await hostAct({ type: 'settle', pid: 1, outcome: 'win' });
   ok(rr._s === 400, 'but still cannot settle their own hand (the server dealer does that)');
   ok(conserved(), 'invariant holds');
+}
+// ---- bankruptcy lockdown ----
+{
+  resetLockCache();
+  regSt.m.set('supply', accounts() + onTables() + pot());          // resync the test's books
+  const front = (method, url, dev) => Front.fetch(new Request('https://w.test' + url, { method, headers: dev ? { 'X-Device-Id': dev } : {} }), Object.assign({ ADMIN_KEY: 'k', ADMIN_EMAILS: '', ROOM: { idFromName: x => x, get: x => ({ fetch: (u, i) => room(x).obj.fetch(new Request(u, i)) }) } }, env));
+  const dev = 'z'.repeat(32); await call('/self', { deviceId: dev });
+  let f = await front('GET', '/api/vault', dev);
+  ok(f.status === 200, 'before the crash the site works');
+  const p0 = pot();
+  await call('/bank/apply', { opId: 'broke:1', ops: [], potDelta: -p0 });
+  regSt.m.set('supply', supply() - p0);                            // test only: the pot's chips went to a table that this test does not keep
+  const cs = regSt.m.get('casino');
+  ok(pot() === 0 && cs.brokeAt > 0, 'the pot hitting zero records the crash time');
+  const info = await call('/casino/get', {});
+  ok(info.locked === true && info.until === cs.brokeAt + 24 * 3600 * 1000, 'the lock runs for exactly 24 hours from the crash');
+  resetLockCache();
+  const outs = [];
+  for (const [m, u] of [['GET', '/api/vault'], ['POST', '/api/rooms'], ['GET', '/api/rooms/ABCDE'], ['POST', '/api/rooms/ABCDE/act'], ['GET', '/api/access/status'], ['GET', '/api/admin/devices'], ['POST', '/api/admin/mint']]) { f = await front(m, u, dev); outs.push(f.status); if (f.status === 423) { const j = await f.json(); assert.ok(j.locked === true && j.until === info.until, 'the 423 carries the time the lock ends'); } }
+  ok(outs.every(x => x === 423), 'every API call is refused with 423 while the house is broke: ' + outs.join(','));
+  f = await front('OPTIONS', '/api/vault'); ok(f.status === 204, 'CORS preflight still answers');
+  f = await front('GET', '/api/casino', dev); const cj = await f.json(); ok(f.status === 200 && cj.locked === true, 'the lock screen can still ask when the casino reopens');
+  // 24 hours later a new casino opens
+  const accBefore = accounts();
+  cs.brokeAt = Date.now() - 24 * 3600 * 1000 - 1000; regSt.m.set('casino', cs); resetLockCache();
+  f = await front('GET', '/api/vault', dev);
+  const c2 = regSt.m.get('casino');
+  ok(f.status === 200 && c2.epoch === 2 && c2.pot === 10000000 && c2.brokeAt === 0, 'after 24 hours the site opens again with a fresh $100,000 pot (casino #2)');
+  ok(accounts() === accBefore && conserved(), 'personal accounts are untouched and the old pot is gone from the money supply');
+  ok(table('CAS20').epoch === 1, 'tables from the old casino keep their old number, so they earn no dealer cut from the new pot');
 }
 console.log('ALL', n, 'CASINO CHECKS PASSED');

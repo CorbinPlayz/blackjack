@@ -47,6 +47,7 @@ export function validState(s) {
    insurance pays 2:1. The shoe and the hole card live under the separate storage key 'secret', so they can never be sent to a client.
    Cards are 0..51 (rank = c % 13: 0 = ace, 1..8 = 2..9, 9..12 = 10/J/Q/K). Time moves lazily: advance() is called on every request. */
 const POT_START = 10000000, MAX_BET_PCT = 2, CUT_PCT = 5, DEFAULT_MAX_BET = 200000;   // casino pot $100,000; max bet = 2% of the pot (so one round pays at most 4 bets = 8%); dealer cut 5%
+const LOCK_MS = 24 * 60 * 60 * 1000, BROKE_BELOW = 100;   // when the pot falls under $1 the whole site locks for exactly 24 hours, then a new casino opens
 const maxBetFor = pot => Math.max(0, Math.floor(pot * MAX_BET_PCT / 100));
 const BET_MS = 20000, MIN_BET_MS = 6000, FIRST_BET_MS = 8000, ACT_MS = 15000, INS_MS = 10000, RESULT_MS = 7000, IDLE_LIMIT = 2;
 export const cardValue = c => { const r = c % 13; return r === 0 ? 11 : r >= 9 ? 10 : r + 1; };
@@ -797,10 +798,28 @@ async function googleKeys() {
   return certCache.keys;
 }
 
+let lockCache = { locked: false, until: 0, checked: 0 };
+export function resetLockCache() { lockCache = { locked: false, until: 0, checked: 0 }; }
+async function lockState(env) {                      // asks the bank at most every 2 seconds per worker instance
+  const now = Date.now();
+  if (lockCache.locked && now < lockCache.until && now - lockCache.checked < 2000) return lockCache;
+  if (!lockCache.locked && now - lockCache.checked < 2000) return lockCache;
+  try {
+    const c = await (await reg(env, '/casino/get', {})).json();
+    lockCache = { locked: !!c.locked, until: c.until || 0, checked: now };
+  } catch (e) { lockCache = { locked: false, until: 0, checked: now }; }
+  return lockCache;
+}
 export default {
   async fetch(request, env) {
     if (request.method === 'OPTIONS') return new Response(null, { status: 204, headers: CORS });
     const url = new URL(request.url);
+
+    // ---- bankruptcy lockdown: checked on EVERY call, on the server, so the page cannot be edited or refreshed around it ----
+    if (url.pathname.startsWith('/api/') && url.pathname !== '/api/casino') {
+      const lk = await lockState(env);
+      if (lk.locked) return json({ error: 'The house went broke.', locked: true, until: lk.until, t: Date.now() }, 423);
+    }
 
     // ---- access control ----
     if (url.pathname === '/api/access/status' && request.method === 'GET') {
@@ -1086,6 +1105,10 @@ async function getCasino(s) {
     c = { pot: POT_START, epoch: 1, brokeAt: 0 };
     await s.put('casino', c);
     await s.put('supply', ((await s.get('supply')) || 0) + POT_START);
+  } else if (c.brokeAt && Date.now() >= c.brokeAt + LOCK_MS) {   // 24 hours after the crash: a new casino opens, the old pot is gone (it was never anyone's personal money)
+    await s.put('supply', ((await s.get('supply')) || 0) - c.pot + POT_START);
+    c = { pot: POT_START, epoch: c.epoch + 1, brokeAt: 0 };
+    await s.put('casino', c);
   }
   return c;
 }
@@ -1194,7 +1217,7 @@ export class Registry {
       if (!REF_RE.test(String(b.ref || '')) || !(await s.get('r:' + b.ref))) return json({ balance: 0 });
       return json({ balance: await ensureGrant(s, b.ref) });
     }
-    if (path === '/casino/get') { const c = await getCasino(s); return json({ pot: c.pot, epoch: c.epoch, brokeAt: c.brokeAt }); }
+    if (path === '/casino/get') { const c = await getCasino(s); return json({ pot: c.pot, epoch: c.epoch, brokeAt: c.brokeAt, locked: c.brokeAt > 0, until: c.brokeAt > 0 ? c.brokeAt + LOCK_MS : 0, t: Date.now() }); }
     if (path === '/bank/apply') {                    // a batch of account moves from a table, all or nothing, applied once per opId
       const ops = Array.isArray(b.ops) ? b.ops : [];
       const opId = typeof b.opId === 'string' && b.opId.length > 0 && b.opId.length <= 80 ? b.opId : '';
@@ -1209,7 +1232,7 @@ export class Registry {
       let applied = potDelta, short = 0;
       if (c.pot + applied < 0) { short = -(c.pot + applied); applied = -c.pot; }
       c.pot += applied;
-      if (c.pot === 0 && !c.brokeAt && (applied < 0)) c.brokeAt = Date.now();
+      if (c.pot < BROKE_BELOW && !c.brokeAt && applied < 0) c.brokeAt = Date.now();   // the house went broke: the lockdown starts now
       if (cutReq && REF_RE.test(String(cutReq.ref || '')) && Number.isInteger(cutReq.base) && cutReq.base > 0 && Number.isInteger(cutReq.potStart) && cutReq.epoch === c.epoch && c.pot > cutReq.potStart && await s.get('r:' + cutReq.ref)) {
         const cut = Math.floor(Math.min(cutReq.base, c.pot - cutReq.potStart) * CUT_PCT / 100);   // 5% of the casino's profit, only if the pot ended above where the shift began
         if (cut > 0) { c.pot -= cut; ops.push({ ref: cutReq.ref, delta: cut, kind: 'dealercut', note: 'Dealer cut (' + CUT_PCT + '% of the shift profit)' }); }

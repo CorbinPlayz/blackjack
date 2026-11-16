@@ -284,9 +284,29 @@
   #bjShow.big .bjtxt { margin-top: 10px; }
   body.fx-off *, body.fx-off *::before, body.fx-off *::after { animation: none !important; transition: none !important; }
   @media (prefers-reduced-motion: reduce) { * , *::before, *::after { animation: none !important; transition: none !important; } }
+  /* bankruptcy lockdown: the whole site is this screen (the server also refuses every call, so hiding it in dev tools changes nothing) */
+  #lockdown { position: fixed; inset: 0; z-index: 99999; display: none; flex-direction: column; align-items: center; justify-content: center; text-align: center; padding: 24px; overflow: hidden; color: #fff;
+    background: radial-gradient(ellipse at 50% 25%, #35104d 0%, #12031f 55%, #05010a 100%); }
+  #lockdown.on { display: flex; }
+  #lockdown > * { position: relative; z-index: 1; }
+  .ld-title { font-size: clamp(36px, 10vw, 68px); font-weight: 900; line-height: 1.05; letter-spacing: 2px; color: #ff4fc3; text-shadow: 0 0 6px #ff4fc3, 0 0 18px #ff2fb3, 0 0 44px #c0007a; animation: ldflick 3.4s infinite; }
+  .ld-sub { max-width: 420px; margin: 14px 0 0; color: #8ff7ff; font-size: 16px; text-shadow: 0 0 8px #00cfe6; }
+  .ld-timer { margin: 18px 0 2px; font-size: clamp(46px, 15vw, 100px); font-weight: 800; font-variant-numeric: tabular-nums; color: #ffe45e; text-shadow: 0 0 10px #ffd000, 0 0 32px #ff9900; }
+  .ld-small { margin-top: 18px; color: #c9b6e0; font-size: 13px; }
+  .ld-chip { position: absolute; top: -60px; z-index: 0; border-radius: 50%; border: 4px dashed rgba(255,255,255,.9); box-shadow: 0 0 14px #ff2fb3, inset 0 0 0 4px rgba(0,0,0,.25); animation: ldfall linear infinite; }
+  @keyframes ldfall { to { transform: translateY(115vh) rotate(720deg); } }
+  @keyframes ldflick { 0%, 18%, 22%, 62%, 100% { opacity: 1; } 20%, 64% { opacity: .55; } }
+  @media (prefers-reduced-motion: reduce) { .ld-chip, .ld-title { animation: none; } }
 </style>
 </head>
 <body>
+<div id="lockdown" role="alert" aria-live="polite">
+  <div class="ld-title">THE HOUSE<br>WENT BROKE</div>
+  <p class="ld-sub">The casino lost too much money. Everything is closed until a new casino opens.</p>
+  <div class="ld-timer" id="ldTimer">24:00:00</div>
+  <p class="ld-sub">until the new casino opens</p>
+  <p class="ld-small">Your bank account is safe. Nothing can be played, sent or changed until then.</p>
+</div>
 
 <h1><span class="chip3d" id="chip3d" aria-hidden="true" style="color:inherit"><span class="spin"><i></i><i></i><i></i><i></i><i></i><i></i><i>♠</i></span></span>Blackjack <span>Chip Tracker</span></h1>
 
@@ -1403,6 +1423,29 @@ var Core = (function () {
     deviceMem = d;
     return d;
   }
+  var lockUntil = 0, lockSkew = 0, lockTimer = null, lockPoll = null, lockDemo = /[?&]demo=broke\b/.test(location.search);
+  function tickLock() {
+    var ms = Math.max(0, lockUntil - (Date.now() + lockSkew)), t = Math.floor(ms / 1000), e = document.getElementById('ldTimer');
+    var two = function (n) { return (n < 10 ? '0' : '') + n; };
+    if (e) e.textContent = two(Math.floor(t / 3600)) + ':' + two(Math.floor(t % 3600 / 60)) + ':' + two(t % 60);
+  }
+  function pollLock() { fetch(ONLINE_URL + '/api/access/status', { headers: { 'X-Device-Id': getDevice() } }).then(function (r) { if (r.status !== 423) location.reload(); }).catch(function () {}); }
+  function showLock(until, serverNow) {
+    var ld = document.getElementById('lockdown'); if (!ld) return;
+    lockUntil = until || (Date.now() + 86400000); lockSkew = serverNow ? serverNow - Date.now() : 0;
+    if (!ld.classList.contains('on')) {
+      ld.classList.add('on');
+      var cols = ['#d4002a', '#0a8f3c', '#1e5bd8', '#222'];
+      for (var i = 0; i < 26; i++) {
+        var c = document.createElement('div'), sz = 22 + Math.floor(Math.random() * 22);
+        c.className = 'ld-chip'; c.style.cssText = 'left:' + Math.floor(Math.random() * 96) + '%;width:' + sz + 'px;height:' + sz + 'px;background:' + cols[i % 4] + ';animation-duration:' + (4 + Math.random() * 6).toFixed(1) + 's;animation-delay:-' + (Math.random() * 8).toFixed(1) + 's';
+        ld.appendChild(c);
+      }
+    }
+    tickLock(); if (!lockTimer) lockTimer = setInterval(tickLock, 500);
+    if (!lockPoll && !lockDemo) lockPoll = setInterval(pollLock, 5000);
+  }
+  if (lockDemo) showLock(Date.now() + 86400000 - 1000, 0);       // add ?demo=broke to the address to preview the screen (it is only a picture; the real lock lives on the server)
   function api(path, opts) {
     opts = opts || {};
     var h = {}; var k;
@@ -1410,7 +1453,10 @@ var Core = (function () {
     h['X-Device-Id'] = getDevice();
     var o = {}; for (k in opts) o[k] = opts[k];
     o.headers = h;
-    return fetch(ONLINE_URL + path, o);
+    return fetch(ONLINE_URL + path, o).then(function (r) {
+      if (r.status === 423) r.clone().json().then(function (j) { showLock(j.until, j.t); }).catch(function () { showLock(0, 0); });   // the house went broke: the whole site is the countdown
+      return r;
+    });
   }
 
   var $ = function (id) { return document.getElementById(id); };
