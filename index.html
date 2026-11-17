@@ -300,6 +300,26 @@
   .choice { border: 1px solid var(--line); border-radius: 14px; padding: 14px; margin-bottom: 12px; }
   .choice h3 { margin: 0 0 4px; font-size: 18px; }
   .choice .online-status { margin-bottom: 8px; }
+  .rou-hist { display:flex; gap:5px; flex-wrap:wrap; margin:8px 0; }
+  .rn { min-width:30px; height:30px; padding:0 4px; border-radius:50%; display:inline-flex; align-items:center; justify-content:center; font-weight:800; font-size:13px; color:#fff; border:0; }
+  .rn.red { background:#c4262e; } .rn.black { background:#1b1b1b; border:1px solid #555; } .rn.green { background:#1c8a46; }
+  .rou-result { text-align:center; margin:8px 0; }
+  .rou-result .rn { width:74px; height:74px; font-size:30px; animation: rpop .6s ease-out; }
+  @keyframes rpop { from { transform: scale(.3) rotate(-300deg); opacity:.2; } to { transform: none; opacity:1; } }
+  .rou-board { display:grid; grid-template-columns: repeat(3, 1fr); gap:4px; margin:10px 0; }
+  .rou-board .rc { height:42px; border-radius:8px; border:1px solid #fff3; font-weight:800; font-size:16px; color:#fff; cursor:pointer; position:relative; }
+  .rou-board .rc.red { background:#c4262e; } .rou-board .rc.black { background:#1b1b1b; } .rou-board .rc.green { background:#1c8a46; }
+  .rou-board .rc .cb { position:absolute; right:3px; top:2px; font-size:10px; background:#ffd000; color:#000; border-radius:8px; padding:0 4px; font-weight:800; }
+  .rou-out { display:grid; grid-template-columns: repeat(3, 1fr); gap:4px; margin:6px 0; }
+  .rou-out button, .rou-ctl button { min-height:40px; font-size:14px; position:relative; }
+  .rou-out .cb { position:absolute; right:3px; top:1px; font-size:10px; background:#ffd000; color:#000; border-radius:8px; padding:0 4px; font-weight:800; }
+  .rou-chips { display:flex; gap:6px; flex-wrap:wrap; margin:8px 0; }
+  .rou-chips button { border-radius:50%; width:52px; height:52px; padding:0; font-weight:800; border:3px dashed #fffb; }
+  .rou-chips button.sel { outline:3px solid #ffd000; }
+  .rou-pick { border:1px solid var(--line); border-radius:12px; padding:10px; margin:8px 0; }
+  .rou-pick .row button { flex:1 1 45%; margin:3px; }
+  .rou-ctl { display:flex; gap:6px; margin-top:6px; }
+  .rou-ctl button { flex:1; }
   #lockdown > * { position: relative; z-index: 1; }
   .ld-title { font-size: clamp(36px, 10vw, 68px); font-weight: 900; line-height: 1.05; letter-spacing: 2px; color: #ff4fc3; text-shadow: 0 0 6px #ff4fc3, 0 0 18px #ff2fb3, 0 0 44px #c0007a; animation: ldflick 3.4s infinite; }
   .ld-sub { max-width: 420px; margin: 14px 0 0; color: #8ff7ff; font-size: 16px; text-shadow: 0 0 8px #00cfe6; }
@@ -376,7 +396,8 @@
     <div class="choice">
       <h3>Start a table</h3>
       <div class="online-status">You get a code to share. The casino deals, so nobody has to.</div>
-      <button type="button" class="btn-ghost" id="hostBtn" style="width:100%">Start an online table</button>
+      <button type="button" class="btn-ghost" id="hostBtn" style="width:100%">Start a blackjack table</button>
+      <button type="button" class="btn-ghost" id="hostRouletteBtn" style="width:100%;margin-top:8px">Start a roulette table</button>
     </div>
   </div>
   <div id="onlineOn" hidden>
@@ -1394,6 +1415,9 @@ var Core = (function () {
       var ni = function (v) { return Number.isInteger(v) && v > 0 ? v : 0; };
       q.last = ni(p.last); q.bet = ni(p.bet); q.hand = ni(p.hand); q.doubled = p.doubled === true; q.out = p.out === true; q.fresh = p.fresh === true;
       q.trivia = ni(p.trivia); q.triviaAt = Number.isInteger(p.triviaAt) ? p.triviaAt : -1; q.vin = ni(p.vin); q.vout = ni(p.vout);
+      q.rb = Array.isArray(p.rb) ? p.rb.filter(function (b) { return b && typeof b.k === 'string' && Array.isArray(b.sel) && Number.isInteger(b.a) && b.a > 0; }).map(function (b) { return { k: b.k, sel: b.sel.slice(0, 2), a: b.a }; }) : [];
+      q.rrep = Array.isArray(p.rrep) ? p.rrep.length : 0;
+      q.rl = p.rl && typeof p.rl === 'object' ? { net: Number.isInteger(p.rl.net) ? p.rl.net : 0, stake: ni(p.rl.stake), pay: ni(p.rl.pay), void: p.rl.void === true } : null;
       q.ins = ni(p.ins); q.insDone = p.insDone === true; q.until = ni(p.until);          // online dealer: this seat's cards
       q.hands = Array.isArray(p.hands) ? p.hands.map(function (h) {
         return { cards: Array.isArray(h.cards) ? h.cards.filter(function (c) { return Number.isInteger(c) && c >= 0 && c < 52; }) : [], bet: ni(h.bet), doubled: h.doubled === true,
@@ -1406,10 +1430,13 @@ var Core = (function () {
     out.settings = { locked: st.locked === true, maxBuyin: Number.isInteger(st.maxBuyin) && st.maxBuyin > 0 ? st.maxBuyin : 0,
       bankFee: Number.isInteger(st.bankFee) && st.bankFee >= 0 && st.bankFee <= 50 ? st.bankFee : 10,
       bankLimit: Number.isInteger(st.bankLimit) && st.bankLimit >= 0 && st.bankLimit <= 20 ? st.bankLimit : 3,
-      triviaPct: Number.isInteger(st.triviaPct) && st.triviaPct >= 0 && st.triviaPct <= 20 ? st.triviaPct : 10, rounds: st.rounds === true, autoBet: st.autoBet !== false, auto: st.auto === true };
+      triviaPct: Number.isInteger(st.triviaPct) && st.triviaPct >= 0 && st.triviaPct <= 20 ? st.triviaPct : 10, rounds: st.rounds === true, autoBet: st.autoBet !== false, auto: st.auto === true, game: st.game === 'roulette' ? 'roulette' : 'blackjack' };
     var dl = s.deal && typeof s.deal === 'object' ? s.deal : null;
     out.deal = dl ? { phase: typeof dl.phase === 'string' ? dl.phase : 'betting', startedAt: Number.isInteger(dl.startedAt) ? dl.startedAt : 0, deadline: Number.isInteger(dl.deadline) ? dl.deadline : 0, dealAt: Number.isInteger(dl.dealAt) ? dl.dealAt : 0,
       cards: Array.isArray(dl.cards) ? dl.cards.filter(function (c) { return Number.isInteger(c) && c >= 0 && c < 52; }) : [], hole: dl.hole === true, dealerBJ: dl.dealerBJ === true } : null;
+    var rl0 = s.roul && typeof s.roul === 'object' ? s.roul : {};
+    out.roul = { phase: rl0.phase === 'results' ? 'results' : 'betting', closeAt: Number.isInteger(rl0.closeAt) ? rl0.closeAt : 0, nextAt: Number.isInteger(rl0.nextAt) ? rl0.nextAt : 0, n: Number.isInteger(rl0.n) && rl0.n > 0 ? rl0.n : 1,
+      num: Number.isInteger(rl0.num) ? rl0.num : -1, hist: Array.isArray(rl0.hist) ? rl0.hist.filter(Number.isInteger).slice(0, 20) : [] };
     out.maxBet = Number.isInteger(s.maxBet) && s.maxBet >= 0 ? s.maxBet : 0;   // online dealer: the biggest wager the casino accepts (2% of its pot)
     var rd = s.round && typeof s.round === 'object' ? s.round : {};
     out.round = { n: Number.isInteger(rd.n) && rd.n > 0 ? rd.n : 1, phase: rd.phase === 'playing' ? 'playing' : 'betting' };
@@ -1566,6 +1593,7 @@ var Core = (function () {
   var bankLedger = [], vaultBal = null, triviaDeck = [], triviaBank = null;
   function roundsOn() { return !!online.role && !!Core.state.settings.rounds; }
   function isAuto() { return roundsOn() && !!Core.state.settings.auto; }
+  function isRoulette() { return isAuto() && Core.state.settings.game === 'roulette'; }
   var skew = 0;                                                         // server clock minus this device's clock, so countdowns agree
   function noteServerTime(d) { if (d && typeof d.t === 'number') skew = d.t - Date.now(); }
   function iDeal() { return online.role === 'host' ? !Core.state.dealer : (!!myRef && Core.state.dealer === myRef); }
@@ -2202,7 +2230,9 @@ var Core = (function () {
 
       var rmode = roundsOn(), auto = isAuto();
       var inplay = rmode && p.hand > 0;
-      if (ctl && rmode && isDealerSeat(p)) {
+      if (isRoulette()) {
+        if (mine && p.rb && p.rb.length) card.appendChild(el('div', 'inplay', 'On the table: ' + Core.fmt(p.rb.reduce(function (n, b) { return n + b.a; }, 0))));
+      } else if (ctl && rmode && isDealerSeat(p)) {
         nm.appendChild(el('span', 'badge', 'DEALER'));
         card.appendChild(el('div', 'locked', 'You are dealing this round, so you do not bet.'));
       } else if (ctl && rmode && inplay) {
@@ -2394,6 +2424,8 @@ var Core = (function () {
         c = Core.checkAmount(a.amountText); if (!c.ok) return c;
         body = { type: a.op === 'in' ? 'vault_deposit' : 'vault_withdraw', pid: a.pid, amount: c.cents }; break;
       case 'remove': body = { type: 'remove', pid: a.pid }; break;
+      case 'rbet': body = { type: 'rbet', k: a.k, sel: a.sel, a: a.a }; break;
+      case 'rop': body = { type: a.op }; break;
       case 'undo': body = { type: 'undo' }; break;
       case 'reset': body = { type: 'reset' }; break;
       case 'settings': body = { type: 'settings' }; for (var k in a.settings) body[k] = a.settings[k]; break;
@@ -2446,7 +2478,7 @@ var Core = (function () {
   function cVal(c) { var r = c % 13; return r === 0 ? 11 : r >= 9 ? 10 : r + 1; }
   function handTot(cards) { var t = 0, a = 0; cards.forEach(function (c) { var v = cVal(c); t += v; if (v === 11) a++; }); while (t > 21 && a) { t -= 10; a--; } return { total: t, soft: a > 0 }; }
   function secsLeft(ts) { return Math.max(0, Math.ceil((ts - (Date.now() + skew)) / 1000)); }
-  function tickTimer() { var cd = $('dealCd'); if (cd) cd.textContent = 'Dealing in ' + secsLeft(parseInt(cd.getAttribute('data-until') || '0', 10)) + '…'; var e = $('dealTimer'); if (!e) return; var u = parseInt(e.getAttribute('data-until') || '0', 10); e.textContent = u ? secsLeft(u) + 's' : ''; }
+  function tickTimer() { var rc = $('rouCd'); if (rc) rc.textContent = 'Bets close in ' + secsLeft(parseInt(rc.getAttribute('data-until') || '0', 10)) + 's'; var cd = $('dealCd'); if (cd) cd.textContent = 'Dealing in ' + secsLeft(parseInt(cd.getAttribute('data-until') || '0', 10)) + '…'; var e = $('dealTimer'); if (!e) return; var u = parseInt(e.getAttribute('data-until') || '0', 10); e.textContent = u ? secsLeft(u) + 's' : ''; }
   setInterval(tickTimer, 500);
   var casinoPot = null;
   function loadPot() { if (!isAuto()) return; api('/api/casino').then(function (r) { return r.ok ? r.json() : null; }).then(function (j) { if (j && typeof j.pot === 'number') casinoPot = j.pot; }).catch(function () {}); }
@@ -2575,6 +2607,7 @@ var Core = (function () {
 
   function renderRound() {
     var box = $('roundPanel');
+    if (isRoulette()) { renderRoulette(box); return; }
     if (isAuto()) { renderDealer(box); return; }
     var on = roundsOn() && Core.state.players.length > 0;
     box.hidden = !on;
@@ -2758,6 +2791,106 @@ var Core = (function () {
   }
   $('vaultSave').addEventListener('click', vaultGo('in'));
   $('vaultTake').addEventListener('click', vaultGo('out'));
+
+  /* ---------- roulette ---------- */
+  var ROU_CHIPS = [500, 1000, 2500, 5000, 10000], rouChip = 500, rouPickNum = -1, rouMsg = '';
+  var ROU_RED = [1, 3, 5, 7, 9, 12, 14, 16, 18, 19, 21, 23, 25, 27, 30, 32, 34, 36];
+  function rouColor(n) { return n === 0 || n === 37 ? 'green' : ROU_RED.indexOf(n) >= 0 ? 'red' : 'black'; }
+  function rouLabel(n) { return n === 37 ? '00' : String(n); }
+  function rouKey(k, sel) { return k + ':' + sel.join(','); }
+  function rouOptions(n) {                       // every bet that touches this number, with its payout
+    var o = [{ k: 'num', sel: [n], t: 'Straight up ' + rouLabel(n), pay: '35 to 1' }];
+    if (n === 0) { o.push({ k: 'split', sel: [0, 37], t: 'Split 0 / 00', pay: '17 to 1' }, { k: 'split', sel: [0, 1], t: 'Split 0 / 1', pay: '17 to 1' }, { k: 'split', sel: [0, 2], t: 'Split 0 / 2', pay: '17 to 1' }); return o; }
+    if (n === 37) { o.push({ k: 'split', sel: [0, 37], t: 'Split 00 / 0', pay: '17 to 1' }, { k: 'split', sel: [37, 2], t: 'Split 00 / 2', pay: '17 to 1' }, { k: 'split', sel: [37, 3], t: 'Split 00 / 3', pay: '17 to 1' }); return o; }
+    var row = Math.floor((n - 1) / 3), col = (n - 1) % 3;
+    if (col > 0) o.push({ k: 'split', sel: [n - 1, n], t: 'Split ' + (n - 1) + ' / ' + n, pay: '17 to 1' });
+    if (col < 2) o.push({ k: 'split', sel: [n, n + 1], t: 'Split ' + n + ' / ' + (n + 1), pay: '17 to 1' });
+    if (n > 3) o.push({ k: 'split', sel: [n - 3, n], t: 'Split ' + (n - 3) + ' / ' + n, pay: '17 to 1' });
+    if (n < 34) o.push({ k: 'split', sel: [n, n + 3], t: 'Split ' + n + ' / ' + (n + 3), pay: '17 to 1' });
+    o.push({ k: 'street', sel: [row * 3 + 1], t: 'Street ' + (row * 3 + 1) + '-' + (row * 3 + 3), pay: '11 to 1' });
+    [[-1, -1], [-1, 0], [0, -1], [0, 0]].forEach(function (d) {      // the four squares this number sits in (top-left number of each)
+      var r0 = row + d[0], c0 = col + d[1]; if (r0 < 0 || r0 > 10 || c0 < 0 || c0 > 1) return;
+      var tl = r0 * 3 + c0 + 1; o.push({ k: 'corner', sel: [tl], t: 'Corner ' + tl + '-' + (tl + 1) + '-' + (tl + 3) + '-' + (tl + 4), pay: '8 to 1' });
+    });
+    return o;
+  }
+  function rouBetsOn(me) { var m = {}; (me && me.rb || []).forEach(function (b) { m[rouKey(b.k, b.sel)] = (m[rouKey(b.k, b.sel)] || 0) + b.a; }); return m; }
+  function rouPlace(k, sel) {
+    if (busy) return; busy = true;
+    perform({ type: 'rbet', k: k, sel: sel, a: rouChip }).then(function (res) {
+      rouMsg = res.ok ? '' : res.error; rouPickNum = -1; if (res.ok) fxSafe(function () { sfxSafe('chip'); });
+    }).then(function () { busy = false; render(); });
+  }
+  function rouOp(op) {
+    if (busy) return; busy = true;
+    perform({ type: 'rop', op: op }).then(function (res) { rouMsg = res.ok ? '' : res.error; }).then(function () { busy = false; render(); });
+  }
+  function renderRoulette(box) {
+    var t = Core.state, R = t.roul, me = mySeat(), betting = R.phase === 'betting';
+    box.hidden = false; box.innerHTML = '';
+    var bar = el('div', 'rbar'), left = el('div');
+    left.appendChild(el('div', 'big', 'Roulette · spin ' + R.n));
+    if (!t.players.length) left.appendChild(el('div', 'sub2', 'Take a seat to start. The wheel spins every 30 seconds once someone has bet.'));
+    else if (betting && R.closeAt) { var cd = el('div', 'sub2'); cd.id = 'rouCd'; cd.setAttribute('data-until', String(R.closeAt)); cd.textContent = 'Bets close in ' + secsLeft(R.closeAt) + 's'; left.appendChild(cd); }
+    else if (!betting) left.appendChild(el('div', 'sub2', 'No more bets. The next round opens in a moment.'));
+    bar.appendChild(left); box.appendChild(bar);
+    if (R.hist.length) {
+      var hs = el('div', 'rou-hist'); R.hist.forEach(function (n) { hs.appendChild(el('span', 'rn ' + rouColor(n), rouLabel(n))); }); box.appendChild(hs);
+    }
+    if (!betting && R.num >= 0) {
+      var rr = el('div', 'rou-result'); rr.appendChild(el('span', 'rn ' + rouColor(R.num), rouLabel(R.num)));
+      rr.appendChild(el('div', 'sub2', rouColor(R.num).toUpperCase() + ' ' + rouLabel(R.num)));
+      if (me && me.rl) rr.appendChild(el('div', 'big ' + (me.rl.net > 0 ? 'pos' : me.rl.net < 0 ? 'neg' : ''), me.rl.void ? 'Your bets were void.' : me.rl.net > 0 ? 'You won ' + Core.fmt(me.rl.net) + '!' : me.rl.net < 0 ? 'You lost ' + Core.fmt(-me.rl.net) : 'You broke even'));
+      else if (me) rr.appendChild(el('div', 'sub2', 'You did not bet this spin.'));
+      box.appendChild(rr);
+    }
+    if (!me) { if (isPlayer()) box.appendChild(el('div', 'sub', 'Take a seat below to place bets.')); return; }
+    var on = rouBetsOn(me), enabled = betting;
+    var chips = el('div', 'rou-chips');
+    ROU_CHIPS.forEach(function (c) {
+      var b = el('button', 'btn-ghost' + (rouChip === c ? ' sel' : ''), '$' + (c / 100)); b.type = 'button'; b.setAttribute('data-rchip', String(c)); chips.appendChild(b);
+    });
+    box.appendChild(chips);
+    function cell(k, sel, text, cls, tag) {
+      var b = el('button', cls, text); b.type = 'button'; b.setAttribute('data-rbet', rouKey(k, sel)); b.setAttribute('data-k', k); b.setAttribute('data-sel', sel.join(','));
+      if (tag) b.setAttribute('data-tag', tag);
+      var amt = on[rouKey(k, sel)]; if (amt) b.appendChild(el('span', 'cb', Core.fmt(amt)));
+      if (!enabled) b.disabled = true; return b;
+    }
+    var zeros = el('div', 'rou-board'); zeros.style.gridTemplateColumns = '1fr 1fr';
+    [0, 37].forEach(function (n) { var b = cell('num', [n], rouLabel(n), 'rc green', 'pick'); b.setAttribute('data-pick', String(n)); zeros.appendChild(b); });
+    box.appendChild(zeros);
+    var bd = el('div', 'rou-board');
+    for (var n = 1; n <= 36; n++) { var c = cell('num', [n], String(n), 'rc ' + rouColor(n), 'pick'); c.setAttribute('data-pick', String(n)); bd.appendChild(c); }
+    box.appendChild(bd);
+    if (rouPickNum >= 0 && enabled) {
+      var pk = el('div', 'rou-pick'); pk.appendChild(el('div', 'sub2', 'Pick a bet for ' + rouLabel(rouPickNum) + ' (chip ' + Core.fmt(rouChip) + '):'));
+      var pr = el('div', 'row'); rouOptions(rouPickNum).forEach(function (o) { var b = el('button', 'btn-ghost', o.t + ' · ' + o.pay); b.type = 'button'; b.setAttribute('data-rbet', rouKey(o.k, o.sel)); b.setAttribute('data-k', o.k); b.setAttribute('data-sel', o.sel.join(',')); pr.appendChild(b); });
+      pk.appendChild(pr); var cl = el('button', 'btn-ghost', 'Cancel'); cl.type = 'button'; cl.setAttribute('data-rpickcancel', '1'); pk.appendChild(cl); box.appendChild(pk);
+    }
+    var o1 = el('div', 'rou-out');
+    [['dozen', 1, '1st 12 · 2:1'], ['dozen', 2, '2nd 12 · 2:1'], ['dozen', 3, '3rd 12 · 2:1'], ['col', 1, 'Column 1 · 2:1'], ['col', 2, 'Column 2 · 2:1'], ['col', 3, 'Column 3 · 2:1']].forEach(function (x) { o1.appendChild(cell(x[0], [x[1]], x[2], 'btn-ghost')); });
+    box.appendChild(o1);
+    var o2 = el('div', 'rou-out');
+    [['low', '1-18 · 1:1'], ['even', 'Even · 1:1'], ['red', 'Red · 1:1'], ['black', 'Black · 1:1'], ['odd', 'Odd · 1:1'], ['high', '19-36 · 1:1']].forEach(function (x) { o2.appendChild(cell(x[0], [], x[1], 'btn-ghost')); });
+    box.appendChild(o2);
+    var tot = me.rb.reduce(function (n2, b) { return n2 + b.a; }, 0);
+    box.appendChild(el('div', 'sub2', (tot ? 'Your bets: ' + Core.fmt(tot) + ' of ' + Core.fmt(me.balance) + ' chips. ' : 'Tap a chip, then tap where to bet. ') + 'Up to 25% of your chips per spin, $5 minimum per bet.'));
+    var ctl = el('div', 'rou-ctl');
+    [['rundo', 'Undo'], ['rclear', 'Clear'], ['rrepeat', 'Repeat last']].forEach(function (x) { var b = el('button', 'btn-ghost', x[1]); b.type = 'button'; b.setAttribute('data-rop', x[0]); if (!enabled || (x[0] === 'rrepeat' ? !me.rrep : !me.rb.length)) b.disabled = true; ctl.appendChild(b); });
+    box.appendChild(ctl);
+    var m = el('div', 'msg'); m.id = 'rouMsg'; m.textContent = rouMsg; box.appendChild(m);
+  }
+  document.addEventListener('click', function (e) {
+    var t = e.target; while (t && t !== document && !(t.getAttribute && (t.getAttribute('data-rchip') || t.getAttribute('data-rbet') || t.getAttribute('data-rop') || t.getAttribute('data-rpickcancel')))) t = t.parentNode;
+    if (!t || t === document || !$('roundPanel').contains(t)) return;
+    e.preventDefault();
+    if (t.getAttribute('data-rchip')) { rouChip = parseInt(t.getAttribute('data-rchip'), 10); render(); return; }
+    if (t.getAttribute('data-rpickcancel')) { rouPickNum = -1; render(); return; }
+    if (t.getAttribute('data-rop')) { rouOp(t.getAttribute('data-rop')); return; }
+    if (t.getAttribute('data-pick')) { rouPickNum = parseInt(t.getAttribute('data-pick'), 10); render(); return; }
+    var sel = t.getAttribute('data-sel'); rouPlace(t.getAttribute('data-k'), sel ? sel.split(',').map(Number) : []);
+  });
 
   /* ---------- welcome card and ? tips ---------- */
   var WELCOME_KEY = 'bjWelcome.v1';
@@ -3149,11 +3282,11 @@ var Core = (function () {
     pollTimer = setInterval(pollOnce, 1500);
   }
 
-  async function hostTable() {
+  async function hostTable(game) {
     if (needUrl()) return;
     setOnlineMsg('Creating table…', true);
     try {
-      var r = await api('/api/rooms', { method: 'POST' });
+      var r = await api('/api/rooms', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ game: game === 'roulette' ? 'roulette' : 'blackjack' }) });
       if (r.status === 403) { accessLost(); return; }
       if (!r.ok) throw new Error('status ' + r.status);
       var d = await r.json();
@@ -3192,7 +3325,8 @@ var Core = (function () {
     }
   }
 
-  $('hostBtn').addEventListener('click', function (e) { e.preventDefault(); hostTable(); });
+  $('hostBtn').addEventListener('click', function (e) { e.preventDefault(); hostTable('blackjack'); });
+  $('hostRouletteBtn').addEventListener('click', function (e) { e.preventDefault(); hostTable('roulette'); });
   $('joinBtn').addEventListener('click', function (e) { e.preventDefault(); joinTable(); });
   $('joinCode').addEventListener('keydown', function (e) { if (e.key === 'Enter') { e.preventDefault(); joinTable(); } });
   $('leaveBtn').addEventListener('click', async function (e) {
