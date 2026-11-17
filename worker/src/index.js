@@ -866,6 +866,10 @@ export default {
         const b = await readJson(request);
         return withCors(await reg(env, '/bank/mint', { ref: String(b.ref || ''), amount: b.amount, note: String(b.note || '').slice(0, 60) }));
       }
+      if (url.pathname === '/api/admin/loans/forgive' && request.method === 'POST') {
+        const b = await readJson(request);
+        return withCors(await reg(env, '/loan/forgive', { ref: String(b.ref || '') }));
+      }
       const am = url.pathname.match(/^\/api\/admin\/devices\/([A-Za-z0-9]+)$/);
       if (am && request.method === 'POST') {
         const b = await readJson(request);
@@ -881,6 +885,17 @@ export default {
       return withCors(await reg(env, '/bank/get', { ref: me.ref }));
     }
 
+    if (url.pathname.startsWith('/api/loans')) {                                // bank and friend loans (all rules live in the Registry)
+      const me = await identify(request, env);
+      if (!me.ok || !me.ref) return json({ error: 'not approved' }, 403);
+      const sub = url.pathname.slice('/api/loans'.length).replace(/^[/]/, '');
+      if (request.method === 'GET' && sub === '') return withCors(await reg(env, '/loan/status', { ref: me.ref }));
+      if (request.method === 'POST' && ['bank', 'offer', 'cancel', 'accept', 'repay'].includes(sub)) {
+        const b = await readJson(request);
+        return withCors(await reg(env, '/loan/' + sub, { ref: me.ref, amount: b.amount, ratePct: b.ratePct, days: b.days, toName: typeof b.toName === 'string' ? b.toName.slice(0, 40) : '', id: typeof b.id === 'string' ? b.id.slice(0, 16) : '' }));
+      }
+      return json({ error: 'not found' }, 404);
+    }
     if (url.pathname === '/api/leaderboard' && request.method === 'GET') {      // net worth ranking: accounts + own chips on tables, never the casino pot
       const me = await identify(request, env);
       if (!me.ok) return json({ error: 'not approved' }, 403);
@@ -997,7 +1012,7 @@ export class Room {
     const code = request.headers.get('X-Code') || '';
     if (expired) {                                   // a closing table pays every seat back into its owner's bank account first (a hand in play is void: the wager was never taken from the seat)
       const old = old0 || normalizeTable(await this.state.storage.get('table'));
-      const back = old.players.filter(p => p.owner && p.balance > 0).map(p => ({ ref: p.owner, delta: p.balance, kind: 'cashout', note: idleClosed ? 'Table closed: nobody played for 5 minutes' : 'Table closed' }));
+      const back = old.players.filter(p => p.owner && p.balance > 0).map(p => ({ ref: p.owner, delta: p.balance, kind: 'cashout', forced: true, note: idleClosed ? 'Table closed: nobody played for 5 minutes' : 'Table closed' }));
       const pend = old.house - old.hs;               // house chips not yet in the casino pot
       if (back.length || pend || old.settings.auto) {   // online dealer table: the rest goes to the pot and the host may earn the dealer cut; a friendly table's house leaves the supply
         const body = { opId: 'exp:' + code + ':' + meta.updated, ops: back, seatsClear: code };
@@ -1036,6 +1051,10 @@ export class Room {
       let accName = ''; try { accName = decodeURIComponent(request.headers.get('X-Name') || ''); } catch (e) { accName = ''; }
       const act = body && body.action;
       let account;                                     // bank account balance, only fetched when an action spends from it
+      if (act && ref && ['seat', 'rebuy', 'vault_withdraw', 'vault_deposit', 'bet', 'remove'].includes(act.type)) {      // an overdue loan freezes the account: no playing, no cashing out, repaying is still allowed
+        let fz = false; try { fz = (await (await reg(this.env, '/vault/get', { ref })).json()).frozen === true; } catch (e) { fz = false; }
+        if (fz) return json({ ok: false, error: 'Your account is frozen until your loan is repaid. Repay it on the Me tab.' }, 400);
+      }
       if (act && ref && ['seat', 'rebuy', 'vault_withdraw'].includes(act.type)) account = (await (await reg(this.env, '/vault/get', { ref })).json()).balance;
       let pot; if (act && act.type === 'bet' && table.settings.auto) { try { pot = (await (await reg(this.env, '/casino/get', {})).json()).pot; } catch (e) { pot = undefined; } }
       const res = applyAction(table, { role: isHost ? 'host' : 'player', ref }, act, { funded: true, account, secret, now, name: accName, pot });
@@ -1119,6 +1138,19 @@ async function ensureGrant(s, ref) {
     await ledgerAdd(s, ref, 'grant', START_GRANT, bal, 'Welcome grant');
   }
   return bal;
+}
+// ---------- loans ----------
+// The bank lends from the casino pot at 5% a day for 3 days; friends lend each other at a rate they choose (max 10% a day) for a time they choose.
+// Simple interest, counted to the second. An overdue loan freezes the borrower (no new buy-ins, no cashing out of a table, nothing sent) until it is repaid.
+const DAY_MS = 86400000, BANK_RATE_BP = 500, BANK_DAYS = 3, LOAN_NET_PCT = 50, BANK_LOAN_POT_PCT = 5, MAX_FRIEND_BP = 1000, MAX_FRIEND_DAYS = 14, MIN_LOAN = 100, MAX_OPEN_OFFERS = 3, OFFER_TTL_MS = DAY_MS;
+const owedAt = (ln, t) => ln.principal + Math.floor(ln.principal * ln.rateBp * Math.max(0, t - ln.start) / (DAY_MS * 10000));
+async function onTableOf(s, ref) { let n = 0; for (const m of (await s.list({ prefix: 'ts:' })).values()) n += (m && m[ref]) || 0; return n; }
+async function acctRec(s, ref) { const k = await s.get('r:' + ref); if (!k) return null; return (String(k).startsWith('g:') ? await s.get(k) : await s.get('d:' + k)) || null; }
+async function isFrozen(s, ref) { const ln = await s.get('ln:' + ref); return !!ln && Date.now() > ln.due; }
+async function moveMoney(s, ref, delta, type, note) {   // one account move with its ledger line; null if the account cannot take it
+  const bal = await ensureGrant(s, ref), next = bal + delta;
+  if (next < 0 || next > MAX_CENTS) return null;
+  await s.put('v:' + ref, next); await ledgerAdd(s, ref, type, delta, next, note); return next;
 }
 const LEDGER_KINDS = ['buyin', 'cashout', 'trivia', 'fee', 'dealercut'];
 // The casino: one pot for the whole site (starts at $100,000, created from nothing as part of the supply, which is why it is counted there).
@@ -1238,18 +1270,118 @@ export class Registry {
     }
     if (path === '/vault/get') {
       if (!REF_RE.test(String(b.ref || '')) || !(await s.get('r:' + b.ref))) return json({ balance: 0 });
-      return json({ balance: await ensureGrant(s, b.ref) });
+      return json({ balance: await ensureGrant(s, b.ref), frozen: await isFrozen(s, b.ref) });
+    }
+    if (path === '/loan/forgive') {                  // admin: wipe a loan (the money already lent is simply gone; nothing is created)
+      if (!REF_RE.test(String(b.ref || ''))) return json({ error: 'bad request' }, 400);
+      const had = !!(await s.get('ln:' + b.ref)); await s.delete('ln:' + b.ref); return json({ ok: true, had });
+    }
+    if (path.startsWith('/loan/')) {
+      const ref = String(b.ref || ''), now = Date.now();
+      const me = REF_RE.test(ref) ? await acctRec(s, ref) : null;
+      if (!me || me.status !== 'approved') return json({ error: 'not approved' }, 403);
+      const bal0 = await ensureGrant(s, ref);
+      const net0 = bal0 + await onTableOf(s, ref);
+      const nameOf = async r => String(((await acctRec(s, r)) || {}).name || 'Player').slice(0, 30);
+      const fail = (msg, code) => json({ error: msg }, code || 409);
+      if (path === '/loan/status') {
+        const ln = await s.get('ln:' + ref), c = await getCasino(s);
+        const limit = ln ? 0 : Math.floor(net0 * LOAN_NET_PCT / 100);
+        const offers = [], myOffers = [], lent = [];
+        for (const [k, o] of (await s.list({ prefix: 'lo:' })).entries()) {
+          if (now - o.created > OFFER_TTL_MS) { await s.delete(k); continue; }
+          if (o.lender === ref) myOffers.push({ id: o.id, amount: o.amount, rateBp: o.rateBp, days: o.days, to: o.toRef ? await nameOf(o.toRef) : '' });
+          else if (!o.toRef || o.toRef === ref) offers.push({ id: o.id, lender: await nameOf(o.lender), amount: o.amount, rateBp: o.rateBp, days: o.days, forMe: !!o.toRef });
+        }
+        for (const [k, l] of (await s.list({ prefix: 'ln:' })).entries()) if (l.lender === ref) lent.push({ borrower: await nameOf(k.slice(3)), principal: l.principal, rateBp: l.rateBp, due: l.due, owed: owedAt(l, now), overdue: now > l.due });
+        return json({ loan: ln ? { kind: ln.kind, principal: ln.principal, rateBp: ln.rateBp, start: ln.start, due: ln.due, owed: owedAt(ln, now), overdue: now > ln.due, lender: ln.lender ? await nameOf(ln.lender) : 'The bank' } : null,
+          frozen: !!ln && now > ln.due, balance: bal0, limit, bankMax: ln ? 0 : Math.max(0, Math.min(limit, Math.floor(c.pot * BANK_LOAN_POT_PCT / 100))),
+          bankRateBp: BANK_RATE_BP, bankDays: BANK_DAYS, maxFriendBp: MAX_FRIEND_BP, maxFriendDays: MAX_FRIEND_DAYS, minLoan: MIN_LOAN, offers, myOffers, lent, t: now });
+      }
+      if (path === '/loan/bank') {
+        const amount = b.amount;
+        if (!Number.isInteger(amount) || amount < MIN_LOAN) return fail('The smallest loan is ' + fmt(MIN_LOAN) + '.', 400);
+        if (await s.get('ln:' + ref)) return fail('You already have a loan. Repay it first.');
+        if (amount > Math.floor(net0 * LOAN_NET_PCT / 100)) return fail('You can borrow at most ' + LOAN_NET_PCT + '% of your net worth: ' + fmt(Math.floor(net0 * LOAN_NET_PCT / 100)) + '.');
+        const c = await getCasino(s);
+        if (c.brokeAt) return fail('The casino is closed.', 423);
+        if (amount > Math.floor(c.pot * BANK_LOAN_POT_PCT / 100)) return fail('The casino cannot lend more than ' + fmt(Math.floor(c.pot * BANK_LOAN_POT_PCT / 100)) + ' right now.');
+        if (bal0 + amount > MAX_CENTS) return fail('That would take your account over the limit.');
+        c.pot -= amount; if (c.pot < BROKE_BELOW && !c.brokeAt) c.brokeAt = now;      // loans come out of the casino pot, so they can bankrupt it
+        const nb = await moveMoney(s, ref, amount, 'loan', 'Bank loan: ' + (BANK_RATE_BP / 100) + '% a day');
+        await s.put('casino', c);
+        await s.put('ln:' + ref, { kind: 'bank', lender: '', principal: amount, rateBp: BANK_RATE_BP, start: now, due: now + BANK_DAYS * DAY_MS });
+        return json({ ok: true, balance: nb });
+      }
+      if (path === '/loan/offer') {
+        if (await isFrozen(s, ref)) return fail('Your account is frozen until your loan is repaid.', 403);
+        const amount = b.amount, rateBp = Math.round(Number(b.ratePct) * 100), days = b.days;
+        if (!Number.isInteger(amount) || amount < MIN_LOAN) return fail('The smallest loan is ' + fmt(MIN_LOAN) + '.', 400);
+        if (!Number.isFinite(rateBp) || rateBp < 0 || rateBp > MAX_FRIEND_BP) return fail('The interest can be 0% to ' + (MAX_FRIEND_BP / 100) + '% a day.', 400);
+        if (!Number.isInteger(days) || days < 1 || days > MAX_FRIEND_DAYS) return fail('The loan can last 1 to ' + MAX_FRIEND_DAYS + ' days.', 400);
+        if (amount > bal0) return fail('You only have ' + fmt(bal0) + ' in your bank account.');
+        let open = 0; for (const o of (await s.list({ prefix: 'lo:' })).values()) if (o.lender === ref && now - o.created <= OFFER_TTL_MS) open++;
+        if (open >= MAX_OPEN_OFFERS) return fail('You can have ' + MAX_OPEN_OFFERS + ' open offers. Cancel one first.');
+        let toRef = '';
+        const want = String(b.toName || '').trim().toLowerCase();
+        if (want) {
+          const hits = [];
+          for (const k of (await s.list({ prefix: 'r:' })).keys()) { const r = k.slice(2), a = await acctRec(s, r); if (a && a.status === 'approved' && String(a.name || '').toLowerCase() === want && r !== ref) hits.push(r); }
+          if (hits.length !== 1) return fail(hits.length ? 'More than one player has that name. Leave the name empty to offer it to everyone.' : 'No player has that name.', 404);
+          toRef = hits[0];
+        }
+        let id; do { id = randomString(8, ALNUM); } while (await s.get('lo:' + id));
+        await s.put('lo:' + id, { id, lender: ref, amount, rateBp, days, toRef, created: now });
+        return json({ ok: true, id });
+      }
+      if (path === '/loan/cancel') {
+        const o = await s.get('lo:' + String(b.id || ''));
+        if (!o || o.lender !== ref) return fail('No such offer.', 404);
+        await s.delete('lo:' + o.id); return json({ ok: true });
+      }
+      if (path === '/loan/accept') {
+        const o = await s.get('lo:' + String(b.id || ''));
+        if (!o || now - o.created > OFFER_TTL_MS) return fail('That offer is gone.', 404);
+        if (o.lender === ref) return fail('You cannot borrow from yourself.');
+        if (o.toRef && o.toRef !== ref) return fail('That offer is for somebody else.', 403);
+        if (await s.get('ln:' + ref)) return fail('You already have a loan. Repay it first.');
+        if (o.amount > Math.floor(net0 * LOAN_NET_PCT / 100)) return fail('You can borrow at most ' + LOAN_NET_PCT + '% of your net worth: ' + fmt(Math.floor(net0 * LOAN_NET_PCT / 100)) + '.');
+        if (await isFrozen(s, o.lender)) return fail('The lender\'s account is frozen right now.');
+        if (!(await s.get('r:' + o.lender)) || (await ensureGrant(s, o.lender)) < o.amount) return fail('The lender no longer has that much.');
+        if (bal0 + o.amount > MAX_CENTS) return fail('That would take your account over the limit.');
+        const lname = await nameOf(o.lender);
+        await moveMoney(s, o.lender, -o.amount, 'lend', 'Loan to ' + (me.name || 'a player') + ': ' + (o.rateBp / 100) + '% a day');
+        const nb = await moveMoney(s, ref, o.amount, 'loan', 'Loan from ' + lname + ': ' + (o.rateBp / 100) + '% a day');
+        await s.put('ln:' + ref, { kind: 'friend', lender: o.lender, principal: o.amount, rateBp: o.rateBp, start: now, due: now + o.days * DAY_MS });
+        await s.delete('lo:' + o.id);
+        return json({ ok: true, balance: nb });
+      }
+      if (path === '/loan/repay') {
+        const ln = await s.get('ln:' + ref);
+        if (!ln) return fail('You have no loan.', 404);
+        const owed = owedAt(ln, now);
+        if (bal0 < owed) return fail('You need ' + fmt(owed) + ' in your bank account to repay (you have ' + fmt(bal0) + ').');
+        const lenderOk = ln.lender && (await s.get('r:' + ln.lender)) && ((await ensureGrant(s, ln.lender)) + owed <= MAX_CENTS);
+        const nb = await moveMoney(s, ref, -owed, 'repay', 'Loan repaid (' + fmt(owed - ln.principal) + ' interest)');
+        if (lenderOk) await moveMoney(s, ln.lender, owed, 'repaid', 'Loan repaid by ' + (me.name || 'a player') + ' (' + fmt(owed - ln.principal) + ' interest)');
+        else { const c = await getCasino(s); c.pot += owed; await s.put('casino', c); }      // the bank's loans (and a lender who is gone) pay back into the casino pot
+        await s.delete('ln:' + ref);
+        return json({ ok: true, balance: nb, paid: owed });
+      }
+      return json({ error: 'not found' }, 404);
     }
     if (path === '/leaderboard') {                   // personal net worth: bank account + own chips on tables. The casino pot is never counted.
       const onTable = {};
       for (const m of (await s.list({ prefix: 'ts:' })).values()) for (const [r, v] of Object.entries(m || {})) onTable[r] = (onTable[r] || 0) + v;
+      const debt = {}, claim = {};                   // loans: what you owe is subtracted, what a friend owes you is added (the bank's loans are a debt of the borrower only)
+      for (const l of (await s.list({ prefix: 'ln:' })).entries()) { const o = owedAt(l[1], Date.now()); debt[l[0].slice(3)] = o; if (l[1].lender) claim[l[1].lender] = (claim[l[1].lender] || 0) + o; }
       const rows = [];
       for (const [k, devId] of (await s.list({ prefix: 'r:' })).entries()) {
         const ref = k.slice(2);
         if (!(await s.get('b:' + ref) || {}).granted) continue;
         const d = (String(devId).startsWith('g:') ? await s.get(devId) : await s.get('d:' + devId)) || {};      // Google accounts live under g:<email>, the owner's device under d:<id>
         if (d.status !== 'approved') continue;
-        const net = ((await s.get('v:' + ref)) || 0) + (onTable[ref] || 0);
+        const net = ((await s.get('v:' + ref)) || 0) + (onTable[ref] || 0) - (debt[ref] || 0) + (claim[ref] || 0);
         const p = (await s.get('p:' + ref)) || null;
         let free = START_GRANT, cut = 0;
         if (p) { free = p.free; cut = p.cut; } else { for (const e of (await s.get('l:' + ref)) || []) { if (e.type === 'dealercut') cut += e.amount; else if (e.type === 'mint' || e.type === 'trivia') free += e.amount; } }
@@ -1258,7 +1390,7 @@ export class Registry {
       rows.sort((x, y) => y.net - x.net);
       return json({ rows: rows.slice(0, 25).map((r, i) => ({ rank: i + 1, name: r.name, net: r.net, profit: r.profit, you: !!b.ref && r.ref === b.ref })), t: Date.now() });
     }
-    if (path === '/casino/get') { const c = await getCasino(s); return json({ pot: c.pot, epoch: c.epoch, brokeAt: c.brokeAt, locked: c.brokeAt > 0, until: c.brokeAt > 0 ? c.brokeAt + LOCK_MS : 0, t: Date.now() }); }
+    if (path === '/casino/get') { const c = await getCasino(s); return json({ frozen: REF_RE.test(String(b.ref || '')) ? await isFrozen(s, b.ref) : false, pot: c.pot, epoch: c.epoch, brokeAt: c.brokeAt, locked: c.brokeAt > 0, until: c.brokeAt > 0 ? c.brokeAt + LOCK_MS : 0, t: Date.now() }); }
     if (path === '/bank/apply') {                    // a batch of account moves from a table, all or nothing, applied once per opId
       const ops = Array.isArray(b.ops) ? b.ops : [];
       const opId = typeof b.opId === 'string' && b.opId.length > 0 && b.opId.length <= 80 ? b.opId : '';
@@ -1285,6 +1417,9 @@ export class Registry {
         if (!o || !REF_RE.test(String(o.ref || '')) || !Number.isInteger(o.delta) || !Number.isInteger(mint) || mint < 0 || !LEDGER_KINDS.includes(o.kind)) return json({ error: 'bad request' }, 400);
         if (exists[o.ref] === undefined) exists[o.ref] = !!(await s.get('r:' + o.ref));
         if (!exists[o.ref] && o.delta < 0) return json({ error: 'no such account' }, 404);
+      }
+      for (const o of ops) {                           // a frozen account (overdue loan) cannot start playing or cash out of a table by itself; a table closing still pays it back
+        if (exists[o.ref] && ((o.kind === 'buyin' && o.delta < 0) || (o.kind === 'cashout' && o.forced !== true)) && await isFrozen(s, o.ref)) return json({ error: 'frozen' }, 403);
       }
       const bal = {};
       for (const o of ops) {
@@ -1315,6 +1450,7 @@ export class Registry {
 
     if (path === '/vault/add') {                     // credit (+) or debit (-); never below zero
       if (!REF_RE.test(String(b.ref || '')) || !Number.isInteger(b.delta)) return json({ error: 'bad request' }, 400);
+      if (b.delta && await isFrozen(s, b.ref)) return json({ error: 'frozen' }, 403);
       const next = ((await s.get('v:' + b.ref)) || 0) + b.delta;
       if (next < 0 || next > MAX_CENTS) return json({ error: 'vault limit' }, 409);
       await s.put('v:' + b.ref, next);

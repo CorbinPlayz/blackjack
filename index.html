@@ -417,6 +417,36 @@
   <div class="msg" id="vaultMsg" role="status"></div>
 </div>
 
+<div class="panel" id="loanPanel" hidden>
+  <h2>Loans</h2>
+  <div class="online-status" id="loanBanner" hidden></div>
+  <div id="loanActive" hidden>
+    <div class="online-status" id="loanInfo"></div>
+    <button type="button" class="btn-ghost" id="loanRepay" style="width:100%;margin-top:8px">Repay in full</button>
+  </div>
+  <div id="loanNew">
+    <div class="online-status" id="loanLimit"></div>
+    <div class="row mt">
+      <input type="text" id="loanAmt" placeholder="Borrow from the bank $" inputmode="decimal" autocomplete="off" style="flex:1">
+      <button type="button" class="btn-ghost" id="loanBorrow">Borrow</button>
+    </div>
+  </div>
+  <h3 style="margin:14px 0 4px;font-size:14px">Offers from friends</h3>
+  <div id="loanOffers" class="online-status" style="font-size:13px">None right now.</div>
+  <h3 style="margin:14px 0 4px;font-size:14px">Lend to a friend</h3>
+  <div class="online-status" style="font-size:12px">You pick the interest (up to 10% a day) and how many days. The interest is yours.</div>
+  <div class="row mt">
+    <input type="text" id="offAmt" placeholder="Amount $" inputmode="decimal" autocomplete="off" style="flex:1">
+    <input type="text" id="offRate" placeholder="% per day" inputmode="decimal" autocomplete="off" style="flex:1">
+    <input type="text" id="offDays" placeholder="Days" inputmode="numeric" autocomplete="off" style="flex:1">
+  </div>
+  <input type="text" id="offTo" placeholder="Friend's name (leave empty to offer to everyone)" autocomplete="off" style="margin-top:8px">
+  <button type="button" class="btn-ghost" id="offerBtn" style="width:100%;margin-top:8px">Post offer</button>
+  <div id="myOffers" class="online-status" style="font-size:13px"></div>
+  <div id="loansLent" class="online-status" style="font-size:13px"></div>
+  <div class="msg" id="loanMsg" role="status"></div>
+</div>
+
 <div class="panel" id="mePanel">
   <h2>Your settings</h2>
 <div class="row">
@@ -1998,7 +2028,7 @@ var Core = (function () {
     curTab = n; lsSet(TAB_KEY, n);
     renderTabs();
     if (n === 'admin') adminLoad();
-    if (n === 'me') refreshVault(true);
+    if (n === 'me') { refreshVault(true); loadLoans(); }
     if (n === 'board') loadBoard(true);
     try { window.scrollTo(0, 0); } catch (e) {}
   }
@@ -2657,7 +2687,7 @@ var Core = (function () {
     $('vaultPanel').hidden = vaultBal === null;
     $('vaultInfo').textContent = 'Your bank account: ' + Core.fmt(vaultBal || 0) + '. ' + (me ? 'Chips on your seat go back here when you leave the table.' : 'Every chip you play with comes out of it: take a seat at an online table to play.');
     $('vaultAmt').disabled = !me;
-    var LT = { grant: 'Welcome grant', mint: 'Added by admin', buyin: 'To a table', cashout: 'From a table', trivia: 'Trivia winnings', dealercut: 'Dealer cut', fee: 'Bank fee' };
+    var LT = { grant: 'Welcome grant', mint: 'Added by admin', buyin: 'To a table', cashout: 'From a table', trivia: 'Trivia winnings', dealercut: 'Dealer cut', fee: 'Bank fee', loan: 'Loan received', repay: 'Loan repaid', lend: 'Lent to a player', repaid: 'Loan paid back to you' };
     $('bankLedger').textContent = bankLedger.slice(0, 15).map(function (e) {
       return new Date(e.t).toLocaleDateString() + '  ' + (LT[e.type] || e.type) + '  ' + (e.amount > 0 ? '+' : '-') + Core.fmt(Math.abs(e.amount)) + '  (balance ' + Core.fmt(e.balance) + ')';
     }).join('\n');
@@ -2685,6 +2715,73 @@ var Core = (function () {
   }
   $('vaultSave').addEventListener('click', vaultGo('in'));
   $('vaultTake').addEventListener('click', vaultGo('out'));
+
+  /* ---------- loans ---------- */
+  var loanData = null, loanAt = 0;
+  function pct(bp) { return (bp / 100) + '%'; }
+  function when(t) { return new Date(t).toLocaleString([], { month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' }); }
+  function loanSay(t, good) { $('loanMsg').textContent = t || ''; $('loanMsg').className = 'msg' + (good ? ' ok' : ''); }
+  function loadLoans() {
+    if (!ONLINE_URL || !myRef) return;
+    loanAt = Date.now();
+    api('/api/loans').then(function (r) { return r.json(); }).then(function (d) { if (d && d.bankRateBp) { loanData = d; renderLoans(); } }).catch(function () {});
+  }
+  function renderLoans() {
+    var d = loanData; if (!d) return;
+    $('loanPanel').hidden = false;
+    var ln = d.loan;
+    $('loanActive').hidden = !ln; $('loanNew').hidden = !!ln;
+    var bn = $('loanBanner'); bn.hidden = !d.frozen;
+    if (d.frozen) bn.textContent = 'ACCOUNT FROZEN: your loan is overdue. You cannot play, send or cash out until you repay it.';
+    if (ln) {
+      $('loanInfo').textContent = (ln.kind === 'bank' ? 'Loan from the bank' : 'Loan from ' + ln.lender) + ': you borrowed ' + Core.fmt(ln.principal) + ' at ' + pct(ln.rateBp) + ' a day. You owe ' + Core.fmt(ln.owed) + ' now. Due ' + when(ln.due) + (ln.overdue ? ' (OVERDUE)' : '') + '.';
+      $('loanRepay').textContent = 'Repay ' + Core.fmt(ln.owed);
+    } else {
+      $('loanLimit').textContent = 'The bank lends at ' + pct(d.bankRateBp) + ' a day for ' + d.bankDays + ' days. You can borrow up to ' + Core.fmt(d.bankMax) + ' (half your net worth, and no more than 5% of the casino pot).';
+    }
+    var of = d.offers || [];
+    var box = $('loanOffers'); box.textContent = '';
+    if (!of.length) box.textContent = 'None right now.';
+    of.forEach(function (o) {
+      var row = el('div', 'row mt'); var t = el('div', '', o.lender + ' offers ' + Core.fmt(o.amount) + ' at ' + pct(o.rateBp) + ' a day for ' + o.days + ' day' + (o.days === 1 ? '' : 's') + (o.forMe ? ' (for you)' : '')); t.style.flex = '1';
+      var b = el('button', 'btn-ghost', 'Accept'); b.type = 'button'; b.setAttribute('data-accept', o.id);
+      row.appendChild(t); row.appendChild(b); box.appendChild(row);
+    });
+    var mo = $('myOffers'); mo.textContent = '';
+    (d.myOffers || []).forEach(function (o) {
+      var row = el('div', 'row mt'); var t = el('div', '', 'Your offer: ' + Core.fmt(o.amount) + ' at ' + pct(o.rateBp) + ' a day for ' + o.days + ' day' + (o.days === 1 ? '' : 's') + (o.to ? ' to ' + o.to : '')); t.style.flex = '1';
+      var b = el('button', 'btn-ghost', 'Cancel'); b.type = 'button'; b.setAttribute('data-cancel', o.id);
+      row.appendChild(t); row.appendChild(b); mo.appendChild(row);
+    });
+    $('loansLent').textContent = (d.lent || []).map(function (l) { return 'You lent ' + Core.fmt(l.principal) + ' to ' + l.borrower + ' at ' + pct(l.rateBp) + ': owed ' + Core.fmt(l.owed) + ', due ' + when(l.due) + (l.overdue ? ' (OVERDUE)' : ''); }).join('\n');
+    $('loansLent').style.whiteSpace = 'pre-line';
+  }
+  function loanPost(path, body, okText) {
+    return api('/api/loans/' + path, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body || {}) })
+      .then(function (r) { return r.json().then(function (j) { return { st: r.status, j: j }; }); })
+      .then(function (x) {
+        if (x.j && x.j.ok) { loanSay(okText, true); loadLoans(); refreshVault(true); } else loanSay((x.j && x.j.error) || 'That did not work.', false);
+        return x;
+      }).catch(function () { loanSay('Could not reach the bank. Try again.', false); });
+  }
+  $('loanBorrow').addEventListener('click', function (e) {
+    e.preventDefault(); var c = Core.parseMoney($('loanAmt').value);
+    if (c === null || c <= 0) { loanSay('Enter how much to borrow, like 50 or 25.50.', false); return; }
+    loanPost('bank', { amount: c }, 'Loan paid into your bank account.').then(function () { $('loanAmt').value = ''; });
+  });
+  $('loanRepay').addEventListener('click', function (e) { e.preventDefault(); loanPost('repay', {}, 'Loan repaid.'); });
+  $('offerBtn').addEventListener('click', function (e) {
+    e.preventDefault(); var c = Core.parseMoney($('offAmt').value), r = parseFloat($('offRate').value), dy = parseInt($('offDays').value, 10);
+    if (c === null || c <= 0 || !isFinite(r) || !(dy >= 1)) { loanSay('Fill in the amount, the % per day (0 to 10) and the number of days.', false); return; }
+    loanPost('offer', { amount: c, ratePct: r, days: dy, toName: $('offTo').value.trim() }, 'Offer posted for 24 hours.');
+  });
+  $('loanPanel').addEventListener('click', function (e) {
+    var t = e.target; if (!t || !t.getAttribute) return;
+    var a = t.getAttribute('data-accept'), c = t.getAttribute('data-cancel');
+    if (a) { e.preventDefault(); loanPost('accept', { id: a }, 'Loan accepted. It is in your bank account.'); }
+    if (c) { e.preventDefault(); loanPost('cancel', { id: c }, 'Offer cancelled.'); }
+  });
+  setInterval(function () { if (curTab === 'me' && Date.now() - loanAt > 15000) loadLoans(); }, 5000);
 
   /* ---------- host settings: trivia % and rounds ---------- */
   $('triviaPctBtn').addEventListener('click', async function (e) {
