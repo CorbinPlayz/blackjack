@@ -1,5 +1,6 @@
 // Step 6: the net-worth leaderboard (bank account + own chips on tables; never the casino pot; free money and dealer cuts are not profit).
-import { Registry, Room, resetLockCache } from './w.mjs';
+import { Registry, Room, resetLockCache, _setStartGrant } from './w.mjs';
+_setStartGrant(100000);
 import Front from './w.mjs';
 import assert from 'node:assert';
 let n = 0; const ok = (x, m) => { assert.ok(x, m); n++; console.log('PASS', m); };

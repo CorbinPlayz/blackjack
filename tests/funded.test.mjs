@@ -1,6 +1,7 @@
 // Step 2: every online chip comes from, and returns to, a bank account. Needs ./w.mjs (copy of worker/src/index.js).
 // Real Room + Registry classes with in-memory storage, so this exercises the same code path as production.
-import { Registry, Room } from './w.mjs';
+import { Registry, Room, _setStartGrant } from './w.mjs';
+_setStartGrant(100000);
 import assert from 'node:assert';
 let n = 0; const ok = (x, m) => { assert.ok(x, m); n++; console.log('PASS', m); };
 

@@ -33,10 +33,11 @@ const A = 'AAAAAAAA', B = 'BBBBBBBB', C = 'CCCCCCCC';
 function mk(refs = [A], bal = 100000) {
   const t = normalizeTable({ settings: { auto: true } }); const secret = normalizeSecret(null);
   refs.forEach((r, i) => { const x = applyAction(t, { role: 'player', ref: r }, { type: 'seat', name: 'P' + i, buyin: bal }, { secret, now: NOW.t }); assert.ok(x.ok, x.error); });
+  t.players.forEach(p => { p.out = false; p.fresh = false; });   // (new players really start sitting out; see the sit-out section below)
   advance(t, secret, NOW.t);                                  // the first betting window opens
   return { t, secret };
 }
-const act = (g, ref, a) => applyAction(g.t, { role: ref === 'H' ? 'host' : 'player', ref: ref === 'H' ? '' : ref }, a, { secret: g.secret, now: NOW.t });
+const act = (g, ref, a) => applyAction(g.t, { role: ref === 'H' ? 'host' : 'player', ref: ref === 'H' ? '' : ref }, a, { secret: g.secret, now: NOW.t, noLimits: !g.limits });
 const tick = (g, ms) => { NOW.t += ms; return advance(g.t, g.secret, NOW.t); };
 // rig the shoe: deal order is every player's first card, the dealer's up card, every player's second card, the hole card, then draws
 const rig = (g, draws) => { g.secret.shoe = [...new Array(120).fill(R[2]), ...draws.slice().reverse()]; };
@@ -63,7 +64,8 @@ const split = (g, i = 0) => act(g, me(g, i).owner, { type: 'split', pid: me(g, i
   tick(g, 3600000); ok(g.t.deal.phase === 'results' && g.t.round.n === 1, 'there is no clock: the results stay up until a player moves on');
   ok(act(g, 'nobody', { type: 'next' }).ok === false, 'a stranger cannot move the table on');
   ok(act(g, A, { type: 'next' }).ok && g.t.round.n === 2 && me(g).last === 1000, 'a seated player presses Next round: auto-repeat puts last round\'s wager back in');
-  ok(['acting', 'insurance', 'results'].includes(g.t.deal.phase) && g.t.deal.phase !== 'betting', 'and with every wager in, the next hand is dealt straight away');
+  ok(g.t.deal.phase === 'betting' && g.t.deal.dealAt > NOW.t, 'and with every wager in, a 5-second countdown starts');
+  tick(g, 5100); ok(['acting', 'insurance', 'results'].includes(g.t.deal.phase), 'then the next hand is dealt');
 }
 // ---------- blackjack 3:2, dealer does not draw ----------
 {
@@ -175,7 +177,8 @@ const split = (g, i = 0) => act(g, me(g, i).owner, { type: 'split', pid: me(g, i
   const g = mk([A, B]); rig(g, hand('K', 'Q', 9, 7, 8, 6));
   act(g, A, { type: 'bet', pid: 1, amount: 1000 }); tick(g, 3600000);
   ok(g.t.deal.phase === 'betting' && g.t.deal.deadline === 0, 'one bettor of two: the dealer waits for the other wager, with no deadline');
-  ok(act(g, B, { type: 'sitout', pid: 2, out: true }).ok && g.t.deal.phase !== 'betting' && me(g, 1).hands.length === 0 && me(g, 0).hands.length === 1, 'sitting out lets the round start without that player');
+  ok(act(g, B, { type: 'sitout', pid: 2, out: true }).ok && g.t.deal.dealAt > 0, 'sitting out starts the countdown without that player'); tick(g, 5100);
+  ok(g.t.deal.phase !== 'betting' && me(g, 1).hands.length === 0 && me(g, 0).hands.length === 1, 'and the round starts without them');
 }
 {
   const g = mk(); round(g, hand('K', 8, 'Q', 10), [1000]); stand(g);

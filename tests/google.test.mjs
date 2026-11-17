@@ -1,4 +1,5 @@
-import {verifyIdToken as V, Registry as R} from './w.mjs';
+import {verifyIdToken as V, Registry as R, _setStartGrant } from './w.mjs';
+_setStartGrant(100000);
 import {webcrypto as c} from 'node:crypto';
 import assert from 'node:assert';
 const CID='cid.apps.googleusercontent.com', now=2000000000;

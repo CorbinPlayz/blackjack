@@ -1,5 +1,6 @@
 // Bank step 1: $1,000 one-time grant, ledger, admin mint, supply, vault moves. Needs ./w.mjs (copy of worker/src/index.js).
-import {Registry as R} from './w.mjs';
+import {Registry as R, _setStartGrant } from './w.mjs';
+_setStartGrant(100000);
 import assert from 'node:assert';
 let n=0;const ok=(x,m)=>{assert.ok(x,m);n++;console.log('PASS',m)};
 const store=new Map(); const st={storage:{get:async k=>store.get(k),put:async(k,v)=>void store.set(k,v),delete:async k=>void store.delete(k),list:async({prefix})=>new Map([...store].filter(([k])=>k.startsWith(prefix)))}};

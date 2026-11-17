@@ -48,6 +48,8 @@ export function validState(s) {
    Cards are 0..51 (rank = c % 13: 0 = ace, 1..8 = 2..9, 9..12 = 10/J/Q/K). Time moves lazily: advance() is called on every request. */
 const POT_START = 10000000, MAX_BET_PCT = 2, CUT_PCT = 5, DEFAULT_MAX_BET = 200000;   // casino pot $100,000; max bet = 2% of the pot (so one round pays at most 4 bets = 8%); dealer cut 5%
 const LOCK_MS = 24 * 60 * 60 * 1000, BROKE_BELOW = 100;   // when the pot falls under $1 the whole site locks for exactly 24 hours, then a new casino opens
+const MIN_BET = 500, BET_BAL_PCT = 25, DEAL_MS = 5000;   // $5 minimum; at most 25% of your chips in one hand; the deal waits 5 seconds so anyone can sit out
+const betCap = p => Math.max(Math.min(MIN_BET, p.balance), Math.floor(p.balance * BET_BAL_PCT / 100));
 const maxBetFor = pot => Math.max(0, Math.floor(pot * MAX_BET_PCT / 100));
 const BET_MS = 20000, MIN_BET_MS = 6000, FIRST_BET_MS = 8000, ACT_MS = 15000, INS_MS = 10000, RESULT_MS = 7000, IDLE_LIMIT = 2;
 export const cardValue = c => { const r = c % 13; return r === 0 ? 11 : r >= 9 ? 10 : r + 1; };
@@ -149,10 +151,13 @@ export function advance(t, secret, now, rand) {
     if (D.phase === 'betting') {
       if (!D.startedAt) {
         D.startedAt = now; D.deadline = 0; moved = true;
-        if (t.settings.autoBet) t.players.forEach(p => { if (!p.out && p.last > 0 && p.balance > 0 && !(p.bet > 0)) p.bet = Math.min(p.last, p.balance, t.maxBet); });
+        if (t.settings.autoBet) t.players.forEach(p => { if (!p.out && p.last > 0 && p.balance > 0 && !(p.bet > 0)) p.bet = Math.min(p.last, betCap(p), t.maxBet); });
       } else {
         const el = eligible(), bet = el.filter(p => p.bet > 0 && p.bet <= p.balance);
-        if (bet.length && bet.length === el.length) { deal(bet); moved = true; }      // everyone who can play has locked in a wager
+        if (bet.length && bet.length === el.length) {      // everyone who can play has locked in a wager: a short countdown, then the deal
+          if (!D.dealAt) { D.dealAt = now + DEAL_MS; moved = true; }
+          else if (now >= D.dealAt) { D.dealAt = 0; deal(bet); moved = true; }
+        } else if (D.dealAt) { D.dealAt = 0; moved = true; }
       }
     } else if (D.phase === 'insurance') {
       const waiting = t.players.filter(p => p.hands.length && !p.insDone);
@@ -244,7 +249,7 @@ export function normalizeTable(t) {
     const q = { id: p.id, name: String(p.name), start: p.start, balance: p.balance,
       added: nn(p.added),                                    // chips taken from the bank after the buy-in (so net profit is honest)
       takes: nn(p.takes),                                    // how many times they went to the bank
-      bet: nn(p.bet), hand: nn(p.hand), doubled: p.doubled === true, out: p.out === true, last: nn(p.last),   // round play: next wager, wager in play, sitting out, last round's wager (for auto-repeat)
+      bet: nn(p.bet), hand: nn(p.hand), doubled: p.doubled === true, out: p.out === true, last: nn(p.last), fresh: p.fresh === true,   // round play: next wager, wager in play, sitting out, last round's wager (for auto-repeat)
       trivia: nn(p.trivia), triviaAt: Number.isInteger(p.triviaAt) ? p.triviaAt : -1,        // trivia winnings so far, and the match they last answered in
       vin: nn(p.vin), vout: nn(p.vout),                      // chips moved in from / out to the savings vault
       hands: (Array.isArray(p.hands) ? p.hands : []).slice(0, 2).map(h => ({     // online dealer: this seat's cards (public: everyone sees them)
@@ -272,7 +277,7 @@ export function normalizeTable(t) {
     funded: Number.isInteger(t.funded) ? t.funded : 0,   // money that came in from bank accounts (net): chips on seats + house always add up to this
     nextId: Math.max(typeof t.nextId === 'number' ? t.nextId : 1, maxId + 1),
     nextHid: Math.max(typeof t.nextHid === 'number' ? t.nextHid : 1, maxHid + 1),
-    deal: { phase: ['betting', 'insurance', 'acting', 'results'].includes(dl.phase) ? dl.phase : 'betting', startedAt: nn(dl.startedAt), deadline: nn(dl.deadline), next: dl.next === true,
+    deal: { phase: ['betting', 'insurance', 'acting', 'results'].includes(dl.phase) ? dl.phase : 'betting', startedAt: nn(dl.startedAt), deadline: nn(dl.deadline), dealAt: nn(dl.dealAt), next: dl.next === true,
       cards: (Array.isArray(dl.cards) ? dl.cards : []).filter(isCard).slice(0, 12), hole: dl.hole === true, shoeLeft: nn(dl.shoeLeft), dealerBJ: dl.dealerBJ === true },   // the dealer's PUBLIC cards (the hole card is not here)
     round: { n: Number.isInteger(rd.n) && rd.n > 0 ? rd.n : 1, phase: rd.phase === 'playing' ? 'playing' : 'betting' },
     dealer: typeof t.dealer === 'string' && REF_RE.test(t.dealer) ? t.dealer : '',          // '' = the host deals
@@ -378,6 +383,7 @@ function applyCore(t, actor, a, ctx, ops) {
       if (funded) {
         if (account < a.buyin) return deny('Not enough money in your bank account (' + fmt(account) + ').');
         t.players.push(newPlayer(t.nextId++, name, a.buyin, actor.ref));
+        if (auto) { const np = t.players[t.players.length - 1]; np.out = true; np.fresh = true; }      // a new player sits out until they place a bet, so nobody is dealt in by surprise
         t.funded += a.buyin;
         bankOp(actor.ref, -a.buyin, 'buyin', 'Bought in at a table');
         return { ok: true, vault: -a.buyin, vaultRef: actor.ref };
@@ -394,7 +400,7 @@ function applyCore(t, actor, a, ctx, ops) {
       if (auto && !mine(p)) return deny(NOT_YOURS);
       if (auto && t.deal.phase !== 'betting') return deny('Bets are closed. Wait for the next round.');
       if (dealerSeat(p)) return deny('The dealer does not bet.');
-      if (p.out) return deny('Sit back in before wagering.');
+      if (p.out && !(auto && p.fresh)) return deny('Sit back in before wagering.');
       if (p.hand > 0) return deny('Your hand is in play. Wager for the next round after it ends.');
       if (!Number.isInteger(a.amount) || a.amount < 0) return deny('Wager must be more than $0.');
       if (a.amount > p.balance) return deny('Wager is more than balance (' + fmt(p.balance) + ').');
@@ -402,11 +408,13 @@ function applyCore(t, actor, a, ctx, ops) {
         if (Number.isInteger(ctx.pot)) t.maxBet = maxBetFor(ctx.pot);
         if (a.amount > 0 && !(t.maxBet > 0)) return deny('The casino cannot cover any bets right now.');
         if (a.amount > t.maxBet) return deny('The max bet is ' + fmt(t.maxBet) + ' (' + MAX_BET_PCT + '% of the casino pot).');
+        if (!ctx.noLimits && a.amount > 0 && a.amount < Math.min(MIN_BET, p.balance)) return deny('The minimum bet is ' + fmt(MIN_BET) + '.');
+        if (!ctx.noLimits && a.amount > betCap(p)) return deny('You can bet at most ' + BET_BAL_PCT + '% of your chips in one hand (' + fmt(betCap(p)) + ').');
       }
       const others = t.players.some(q => q !== p && q.bet > 0);
       p.bet = a.amount;
       if (auto) {
-        p.idle = 0;
+        p.idle = 0; if (p.fresh && a.amount > 0) { p.fresh = false; p.out = false; } t.deal.dealAt = 0;      // a new player joins the round by betting; any change restarts the countdown
         advance(t, ctx.secret, now, ctx.rand);
       }
       return { ok: true, bet: p.bet };
@@ -460,7 +468,8 @@ function applyCore(t, actor, a, ctx, ops) {
       if (p.hand > 0) return deny('Your hand is in play.');
       p.out = a.out === true; p.idle = 0;
       if (p.out) p.bet = 0;
-      else if (!auto && t.round.phase === 'betting' && !(p.bet > 0) && !dealerSeat(p) && t.settings.autoBet && p.last > 0 && p.balance > 0) p.bet = Math.min(p.last, p.balance);
+      if (auto) { p.fresh = false; t.deal.dealAt = 0; }
+      if (!p.out && !auto && t.round.phase === 'betting' && !(p.bet > 0) && !dealerSeat(p) && t.settings.autoBet && p.last > 0 && p.balance > 0) p.bet = Math.min(p.last, p.balance);
       if (auto) advance(t, ctx.secret, now, ctx.rand);      // nobody is waiting on a player who sat out
       return { ok: true };
     }
@@ -885,6 +894,11 @@ export default {
       return withCors(await reg(env, '/bank/get', { ref: me.ref }));
     }
 
+    if (url.pathname === '/api/bonus' && (request.method === 'GET' || request.method === 'POST')) {
+      const me = await identify(request, env);
+      if (!me.ok || !me.ref) return json({ error: 'not approved' }, 403);
+      return withCors(await reg(env, request.method === 'GET' ? '/bonus/status' : '/bonus/claim', { ref: me.ref }));
+    }
     if (url.pathname.startsWith('/api/loans')) {                                // bank and friend loans (all rules live in the Registry)
       const me = await identify(request, env);
       if (!me.ok || !me.ref) return json({ error: 'not approved' }, 403);
@@ -1107,14 +1121,16 @@ export class Room {
 
 // Single instance holding every device that has asked for access.
 // status: 'pending' (asked) -> 'approved' | 'blocked'. 'remove' deletes the record.
-const START_GRANT = 100000;                      // $1,000 in cents, once per account
+let START_GRANT = 250000;                      // $2,500 in cents, once per account (accounts made before this change got $1,000)
+export const _setStartGrant = n => { START_GRANT = n; };      // tests only: older suites keep their round $1,000 numbers
+const BONUS_AMT = 25000, BONUS_BELOW = 50000, BONUS_MS = 86400000;      // daily bonus: $250, once every 24 hours, only when the account holds under $500
 const LEDGER_MAX = 100;
 // Running totals per account for the leaderboard: `free` = money that was handed out (welcome grant, admin mint, trivia), `cut` = dealer cuts.
 // Profit on the leaderboard = net worth - free - cut, so neither free money nor the dealer's pay counts as winning. First use starts from the saved ledger.
 async function addTotals(s, ref, type, amount, ledger) {
-  if (!['grant', 'mint', 'trivia', 'dealercut'].includes(type)) return;
+  if (!['grant', 'mint', 'trivia', 'bonus', 'dealercut'].includes(type)) return;
   let p = await s.get('p:' + ref);
-  if (!p) { p = { free: 0, cut: 0 }; for (const e of ledger) { if (e.type === 'dealercut') p.cut += e.amount; else if (['grant', 'mint', 'trivia'].includes(e.type)) p.free += e.amount; } }
+  if (!p) { p = { free: 0, cut: 0 }; for (const e of ledger) { if (e.type === 'dealercut') p.cut += e.amount; else if (['grant', 'mint', 'trivia', 'bonus'].includes(e.type)) p.free += e.amount; } }
   if (type === 'dealercut') p.cut += amount; else p.free += amount;
   await s.put('p:' + ref, p);
 }
@@ -1370,6 +1386,20 @@ export class Registry {
       }
       return json({ error: 'not found' }, 404);
     }
+    if (path === '/bonus/status' || path === '/bonus/claim') {      // daily top-up: $250 once every 24 hours, only while the account holds under $500 (new money, so the supply grows)
+      const ref = String(b.ref || '');
+      const me = REF_RE.test(ref) ? await acctRec(s, ref) : null;
+      if (!me || me.status !== 'approved') return json({ error: 'not approved' }, 403);
+      const bal = await ensureGrant(s, ref), last = (await s.get('bn:' + ref)) || 0, now = Date.now();
+      const wait = Math.max(0, last + BONUS_MS - now), eligible = bal < BONUS_BELOW && wait === 0;
+      if (path === '/bonus/status') return json({ eligible, wait, below: BONUS_BELOW, amount: BONUS_AMT, balance: bal });
+      if (bal >= BONUS_BELOW) return json({ error: 'The daily bonus is only for accounts under ' + fmt(BONUS_BELOW) + '.' }, 409);
+      if (wait > 0) return json({ error: 'You already claimed today. Come back later.', wait }, 409);
+      await s.put('bn:' + ref, now);
+      await s.put('supply', ((await s.get('supply')) || 0) + BONUS_AMT);
+      const nb = bal + BONUS_AMT; await s.put('v:' + ref, nb); await ledgerAdd(s, ref, 'bonus', BONUS_AMT, nb, 'Daily bonus');
+      return json({ ok: true, balance: nb });
+    }
     if (path === '/leaderboard') {                   // personal net worth: bank account + own chips on tables. The casino pot is never counted.
       const onTable = {};
       for (const m of (await s.list({ prefix: 'ts:' })).values()) for (const [r, v] of Object.entries(m || {})) onTable[r] = (onTable[r] || 0) + v;
@@ -1383,8 +1413,8 @@ export class Registry {
         if (d.status !== 'approved') continue;
         const net = ((await s.get('v:' + ref)) || 0) + (onTable[ref] || 0) - (debt[ref] || 0) + (claim[ref] || 0);
         const p = (await s.get('p:' + ref)) || null;
-        let free = START_GRANT, cut = 0;
-        if (p) { free = p.free; cut = p.cut; } else { for (const e of (await s.get('l:' + ref)) || []) { if (e.type === 'dealercut') cut += e.amount; else if (e.type === 'mint' || e.type === 'trivia') free += e.amount; } }
+        let free = 0, cut = 0, sawGrant = false;
+        if (p) { free = p.free; cut = p.cut; } else { for (const e of (await s.get('l:' + ref)) || []) { if (e.type === 'dealercut') cut += e.amount; else if (e.type === 'grant') { free += e.amount; sawGrant = true; } else if (e.type === 'mint' || e.type === 'trivia' || e.type === 'bonus') free += e.amount; } if (!sawGrant) free += 100000; }
         rows.push({ ref, name: String(d.name || 'Player').slice(0, 30), net, profit: net - free - cut });
       }
       rows.sort((x, y) => y.net - x.net);

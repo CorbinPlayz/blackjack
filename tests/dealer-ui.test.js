@@ -7,6 +7,7 @@ const html = path.resolve(__dirname, '../index.html');
 const shots = process.env.SHOTS || '';
 (async () => {
   const W = await import('./w.mjs');
+  W._setStartGrant(100000);
   const mkStore = () => { const m = new Map(); return { storage: { get: async k => m.get(k), put: async (k, v) => void m.set(k, v), delete: async k => void m.delete(k), deleteAll: async () => m.clear(), list: async ({ prefix }) => new Map([...m].filter(([k]) => k.startsWith(prefix))) } }; };
   const registry = new W.Registry({ storage: mkStore().storage });
   const rooms = {};
@@ -53,13 +54,15 @@ const shots = process.env.SHOTS || '';
   await shot('1-empty');
   // take a seat from the bank account
   await p.fill('#newStart', '500'); await p.click('#addBtn'); await p.waitForTimeout(1200);
+  ok(/place a bet to join/i.test(await p.locator('#players').innerText()), 'a new player is told to place a bet to join the round');
   ok(/Admin/.test(await p.locator('#roundPanel').innerText()), 'the new seat shows on the dealer table');
   ok((await call('GET', '/api/vault', devP))._s === 200 && (await call('GET', '/api/vault', devP)).balance === 50000, 'the $500 buy-in came out of the $1,000 bank account');
   ok(await p.locator('#hostFundHint').isHidden(), 'players do not see the host-only hint');
   // wager
   await p.waitForTimeout(500);
   await p.locator('button[data-action="qbet"]').first().click(); await p.waitForTimeout(800);
-  ok(await p.locator('#dealTimer').count() === 0, 'there is no countdown any more');
+  ok(await p.locator('#dealTimer').count() === 0, 'the old betting/acting clocks are gone');
+  ok(/Dealing in [1-5]/.test(await p.locator('#roundPanel').innerText()) || await p.locator('#dealCd').count() === 0, 'the 5-second deal countdown shows (or the hand already started)');
   await shot('2-betting');
   // the dealer deals by itself once everyone has bet
   await p.waitForFunction(() => document.querySelectorAll('#roundPanel .dkc').length >= 3, null, { timeout: 30000 });

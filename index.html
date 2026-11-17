@@ -415,6 +415,10 @@
     <button type="button" class="btn-ghost" id="vaultTake" style="flex:1">Withdraw</button>
   </div>
   <div class="msg" id="vaultMsg" role="status"></div>
+  <div id="bonusRow" hidden style="margin-top:10px">
+    <div class="online-status" id="bonusInfo"></div>
+    <button type="button" class="btn-add" id="bonusBtn" style="width:100%;margin-top:6px">Claim daily bonus</button>
+  </div>
 </div>
 
 <div class="panel" id="loanPanel" hidden>
@@ -1358,7 +1362,7 @@ var Core = (function () {
     }).map(function (p) {
       var q = { id: p.id, name: p.name, start: p.start, balance: p.balance, added: Number.isInteger(p.added) && p.added > 0 ? p.added : 0, takes: Number.isInteger(p.takes) && p.takes > 0 ? p.takes : 0 };
       var ni = function (v) { return Number.isInteger(v) && v > 0 ? v : 0; };
-      q.last = ni(p.last); q.bet = ni(p.bet); q.hand = ni(p.hand); q.doubled = p.doubled === true; q.out = p.out === true;
+      q.last = ni(p.last); q.bet = ni(p.bet); q.hand = ni(p.hand); q.doubled = p.doubled === true; q.out = p.out === true; q.fresh = p.fresh === true;
       q.trivia = ni(p.trivia); q.triviaAt = Number.isInteger(p.triviaAt) ? p.triviaAt : -1; q.vin = ni(p.vin); q.vout = ni(p.vout);
       q.ins = ni(p.ins); q.insDone = p.insDone === true; q.until = ni(p.until);          // online dealer: this seat's cards
       q.hands = Array.isArray(p.hands) ? p.hands.map(function (h) {
@@ -1374,7 +1378,7 @@ var Core = (function () {
       bankLimit: Number.isInteger(st.bankLimit) && st.bankLimit >= 0 && st.bankLimit <= 20 ? st.bankLimit : 3,
       triviaPct: Number.isInteger(st.triviaPct) && st.triviaPct >= 0 && st.triviaPct <= 20 ? st.triviaPct : 10, rounds: st.rounds === true, autoBet: st.autoBet !== false, auto: st.auto === true };
     var dl = s.deal && typeof s.deal === 'object' ? s.deal : null;
-    out.deal = dl ? { phase: typeof dl.phase === 'string' ? dl.phase : 'betting', startedAt: Number.isInteger(dl.startedAt) ? dl.startedAt : 0, deadline: Number.isInteger(dl.deadline) ? dl.deadline : 0,
+    out.deal = dl ? { phase: typeof dl.phase === 'string' ? dl.phase : 'betting', startedAt: Number.isInteger(dl.startedAt) ? dl.startedAt : 0, deadline: Number.isInteger(dl.deadline) ? dl.deadline : 0, dealAt: Number.isInteger(dl.dealAt) ? dl.dealAt : 0,
       cards: Array.isArray(dl.cards) ? dl.cards.filter(function (c) { return Number.isInteger(c) && c >= 0 && c < 52; }) : [], hole: dl.hole === true, dealerBJ: dl.dealerBJ === true } : null;
     out.maxBet = Number.isInteger(s.maxBet) && s.maxBet >= 0 ? s.maxBet : 0;   // online dealer: the biggest wager the casino accepts (2% of its pot)
     var rd = s.round && typeof s.round === 'object' ? s.round : {};
@@ -2028,7 +2032,7 @@ var Core = (function () {
     curTab = n; lsSet(TAB_KEY, n);
     renderTabs();
     if (n === 'admin') adminLoad();
-    if (n === 'me') { refreshVault(true); loadLoans(); }
+    if (n === 'me') { refreshVault(true); loadLoans(); loadBonus(); }
     if (n === 'board') loadBoard(true);
     try { window.scrollTo(0, 0); } catch (e) {}
   }
@@ -2178,17 +2182,18 @@ var Core = (function () {
           drow.appendChild(dbl); card.appendChild(drow);
         }
       } else if (ctl && auto && (!mine || (Core.state.deal && Core.state.deal.phase !== 'betting' && Core.state.deal.phase !== 'results'))) {
-        if (mine) card.appendChild(el('div', 'sub', p.out ? 'Sitting out. Sit back in to play.' : 'Wagers open again after the results.'));
+        if (mine) card.appendChild(el('div', 'sub', p.out ? (p.fresh ? 'You are watching this round. Place a bet when wagers open again.' : 'Sitting out. Sit back in to play.') : 'Wagers open again after the results.'));
         if (mine && p.out) { var so2 = el('button', 'btn-ghost mt', 'Sit back in'); so2.type = 'button'; so2.setAttribute('data-action', 'sitout'); so2.setAttribute('data-out', '0'); card.appendChild(so2); }
       } else if (ctl && rmode) {
         var wrap0 = el('div', 'wager');
-        var lab0 = el('label', null, p.out ? 'Sitting out' : (p.bet > 0 ? 'Wager locked in' : 'Wager for this round')); lab0.setAttribute('for', 'w' + p.id);
+        var lab0 = el('label', null, p.out && p.fresh ? 'Place a bet to join this round' : p.out ? 'Sitting out' : (p.bet > 0 ? 'Wager locked in' : 'Wager for this round')); lab0.setAttribute('for', 'w' + p.id);
         wrap0.appendChild(lab0);
-        if (!p.out) {
+        if (!p.out || (auto && p.fresh)) {
           var qb = el('div', 'qbets');
           var seenQ = {};
           [0.05, 0.1, 0.25, 0.5].forEach(function (f) {
-            var c = Math.max(100, Math.round(p.balance * f / 100) * 100); if (c > p.balance) c = p.balance;
+            var c = Math.max(500, Math.round(p.balance * f / 100) * 100); if (c > p.balance) c = p.balance;
+            if (auto && c > Math.max(Math.min(500, p.balance), Math.floor(p.balance * 0.25))) c = Math.max(Math.min(500, p.balance), Math.floor(p.balance * 0.25));
             if (auto && Core.state.maxBet > 0 && c > Core.state.maxBet) c = Core.state.maxBet;
             if (c < 1 || seenQ[c]) return; seenQ[c] = 1;
             var qbtn = el('button', 'btn-ghost' + (p.bet === c ? ' sel' : ''), Core.fmt(c)); qbtn.type = 'button';
@@ -2207,9 +2212,11 @@ var Core = (function () {
           var lk = el('button', 'btn-add', p.bet > 0 ? 'Change wager (' + Core.fmt(p.bet) + ' locked)' : 'Lock in wager'); lk.type = 'button'; lk.setAttribute('data-action', 'bet');
           wrap0.appendChild(lk);
         }
-        var so = el('button', 'btn-ghost mt', p.out ? 'Sit back in' : 'Sit out'); so.type = 'button';
-        so.setAttribute('data-action', 'sitout'); so.setAttribute('data-out', p.out ? '0' : '1');
-        wrap0.appendChild(so);
+        if (!(auto && p.fresh)) {
+          var so = el('button', 'btn-ghost mt', p.out ? 'Sit back in' : 'Sit out'); so.type = 'button';
+          so.setAttribute('data-action', 'sitout'); so.setAttribute('data-out', p.out ? '0' : '1');
+          wrap0.appendChild(so);
+        }
         card.appendChild(wrap0);
       }
       if (ctl && rmode && !auto && online.role === 'host' && p.owner && !isDealerSeat(p) && Core.state.round.phase === 'betting') {
@@ -2408,7 +2415,7 @@ var Core = (function () {
   function cVal(c) { var r = c % 13; return r === 0 ? 11 : r >= 9 ? 10 : r + 1; }
   function handTot(cards) { var t = 0, a = 0; cards.forEach(function (c) { var v = cVal(c); t += v; if (v === 11) a++; }); while (t > 21 && a) { t -= 10; a--; } return { total: t, soft: a > 0 }; }
   function secsLeft(ts) { return Math.max(0, Math.ceil((ts - (Date.now() + skew)) / 1000)); }
-  function tickTimer() { var e = $('dealTimer'); if (!e) return; var u = parseInt(e.getAttribute('data-until') || '0', 10); e.textContent = u ? secsLeft(u) + 's' : ''; }
+  function tickTimer() { var cd = $('dealCd'); if (cd) cd.textContent = 'Dealing in ' + secsLeft(parseInt(cd.getAttribute('data-until') || '0', 10)) + '…'; var e = $('dealTimer'); if (!e) return; var u = parseInt(e.getAttribute('data-until') || '0', 10); e.textContent = u ? secsLeft(u) + 's' : ''; }
   setInterval(tickTimer, 500);
   var casinoPot = null;
   function loadPot() { if (!isAuto()) return; api('/api/casino').then(function (r) { return r.ok ? r.json() : null; }).then(function (j) { if (j && typeof j.pot === 'number') casinoPot = j.pot; }).catch(function () {}); }
@@ -2450,7 +2457,12 @@ var Core = (function () {
     var bar = el('div', 'rbar'), left = el('div');
     left.appendChild(el('div', 'big', 'Round ' + t.round.n + ' · ' + title));
     left.appendChild(el('div', 'sub2', 'Online dealer · stands on all 17 · blackjack pays 3:2 · split once · the table closes after 5 minutes with nobody playing'));
-    left.appendChild(el('div', 'sub2', (casinoPot === null ? '' : 'Casino pot ' + Core.fmt(casinoPot) + ' · ') + 'Max bet ' + Core.fmt(t.maxBet || 0)));
+    if (D.phase === 'betting' && D.dealAt) {
+      var cdn = el('div', 'big'); cdn.id = 'dealCd'; cdn.setAttribute('data-until', String(D.dealAt)); cdn.textContent = 'Dealing in ' + secsLeft(D.dealAt) + '…';
+      left.appendChild(cdn);
+      left.appendChild(el('div', 'sub2', 'Want out of this round? Tap Sit out on your seat before the cards go down.'));
+    }
+    left.appendChild(el('div', 'sub2', (casinoPot === null ? '' : 'Casino pot ' + Core.fmt(casinoPot) + ' · ') + 'Max bet ' + Core.fmt(t.maxBet || 0) + ' · $5 minimum · up to 25% of your chips per hand'));
     bar.appendChild(left);
     box.appendChild(bar);
     var dz = el('div', 'dealerbox');
@@ -2458,7 +2470,7 @@ var Core = (function () {
     var cs = el('div', 'dkcards');
     D.cards.forEach(function (c) { cs.appendChild(cardEl(c)); });
     if (D.hole) cs.appendChild(cardEl(0, true));
-    if (!D.cards.length && !D.hole) cs.appendChild(el('div', 'sub', t.players.length ? 'There are no clocks: the cards are dealt as soon as every seated player has bet (or sits out).' : 'Waiting for players to take a seat.'));
+    if (!D.cards.length && !D.hole) cs.appendChild(el('div', 'sub', t.players.length ? 'The cards are dealt 5 seconds after every seated player has bet (or sat out).' : 'Waiting for players to take a seat.'));
     dz.appendChild(cs); box.appendChild(dz);
     t.players.forEach(function (p) {
       var mineSeat = !!myRef && p.owner === myRef, row = el('div', 'dseat' + (mineSeat ? ' me' : ''));
@@ -2687,7 +2699,7 @@ var Core = (function () {
     $('vaultPanel').hidden = vaultBal === null;
     $('vaultInfo').textContent = 'Your bank account: ' + Core.fmt(vaultBal || 0) + '. ' + (me ? 'Chips on your seat go back here when you leave the table.' : 'Every chip you play with comes out of it: take a seat at an online table to play.');
     $('vaultAmt').disabled = !me;
-    var LT = { grant: 'Welcome grant', mint: 'Added by admin', buyin: 'To a table', cashout: 'From a table', trivia: 'Trivia winnings', dealercut: 'Dealer cut', fee: 'Bank fee', loan: 'Loan received', repay: 'Loan repaid', lend: 'Lent to a player', repaid: 'Loan paid back to you' };
+    var LT = { grant: 'Welcome grant', mint: 'Added by admin', buyin: 'To a table', cashout: 'From a table', trivia: 'Trivia winnings', dealercut: 'Dealer cut', fee: 'Bank fee', bonus: 'Daily bonus', loan: 'Loan received', repay: 'Loan repaid', lend: 'Lent to a player', repaid: 'Loan paid back to you' };
     $('bankLedger').textContent = bankLedger.slice(0, 15).map(function (e) {
       return new Date(e.t).toLocaleDateString() + '  ' + (LT[e.type] || e.type) + '  ' + (e.amount > 0 ? '+' : '-') + Core.fmt(Math.abs(e.amount)) + '  (balance ' + Core.fmt(e.balance) + ')';
     }).join('\n');
@@ -2715,6 +2727,27 @@ var Core = (function () {
   }
   $('vaultSave').addEventListener('click', vaultGo('in'));
   $('vaultTake').addEventListener('click', vaultGo('out'));
+
+  /* ---------- daily bonus ---------- */
+  var bonusData = null;
+  function loadBonus() {
+    if (!ONLINE_URL || !myRef) return;
+    api('/api/bonus').then(function (r) { return r.json(); }).then(function (d) { if (d && typeof d.amount === 'number') { bonusData = d; renderBonus(); } }).catch(function () {});
+  }
+  function renderBonus() {
+    var d = bonusData; if (!d) return;
+    var low = d.balance < d.below;
+    $('bonusRow').hidden = !low;
+    $('bonusBtn').hidden = !d.eligible;
+    $('bonusInfo').textContent = d.eligible ? 'Running low? Claim ' + Core.fmt(d.amount) + ' free, once every 24 hours (only while you hold under ' + Core.fmt(d.below) + ').' : 'Daily bonus already claimed. Next one in about ' + Math.max(1, Math.ceil(d.wait / 3600000)) + ' hour(s).';
+  }
+  $('bonusBtn').addEventListener('click', function (e) {
+    e.preventDefault();
+    api('/api/bonus', { method: 'POST' }).then(function (r) { return r.json(); }).then(function (d) {
+      $('vaultMsg').textContent = d && d.ok ? 'Daily bonus added to your bank account.' : ((d && d.error) || 'Could not claim it.'); $('vaultMsg').className = 'msg' + (d && d.ok ? ' ok' : '');
+      refreshVault(true); loadBonus();
+    }).catch(function () {});
+  });
 
   /* ---------- loans ---------- */
   var loanData = null, loanAt = 0;

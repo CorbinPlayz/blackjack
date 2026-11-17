@@ -1,5 +1,6 @@
 // Step 7: loans and interest (bank loans from the casino pot, friend loans, freezing, conservation).
-import { Registry, Room, resetLockCache } from './w.mjs';
+import { Registry, Room, resetLockCache, _setStartGrant } from './w.mjs';
+_setStartGrant(100000);
 import Front from './w.mjs';
 import assert from 'node:assert';
 let n = 0; const ok = (x, m) => { assert.ok(x, m); n++; console.log('PASS', m); };
@@ -94,13 +95,14 @@ ok((await call('/loan/forgive', { ref: ref.B })).had && !regSt.m.has('ln:' + ref
   const T = room('LN001'); T.obj = new Room({ storage: T.st.storage }, env);
   await T.obj.fetch(new Request('https://room/init', { method: 'POST', headers: { 'X-Ref': ref.C }, body: JSON.stringify({ token: 'tk' }) }));
   const act = async (who, action) => { const r = await T.obj.fetch(new Request('https://room/act', { method: 'POST', headers: { 'X-Code': 'LN001', 'X-Ref': ref[who], 'X-Name': 'x' }, body: JSON.stringify({ action }) })); return Object.assign(await r.json(), { _s: r.status }); };
-  ok((await act('C', { type: 'seat', buyin: 5000 })).ok, 'C sits down');
+  { const cs = regSt.m.get('casino'); cs.pot += 10000000; regSt.m.set('casino', cs); const sp = regSt.m.get('supply'); regSt.m.set('supply', sp + 10000000); }
+  ok((await act('C', { type: 'seat', buyin: 50000 })).ok, 'C sits down');
   await call('/bank/mint', { ref: ref.C, amount: 100000, note: 'gift' });
   ok((await loan('C', 'bank', { amount: 200 })).ok, 'C borrows from the bank');
   const lc2 = regSt.m.get('ln:' + ref.C); lc2.due = Date.now() - 1; regSt.m.set('ln:' + ref.C, lc2);
-  const r1 = await act('C', { type: 'bet', pid: 1, amount: 50 }); ok(!r1.ok && /frozen/.test(r1.error), 'frozen: cannot bet');
+  const r1 = await act('C', { type: 'bet', pid: 1, amount: 500 }); ok(!r1.ok && /frozen/.test(r1.error), 'frozen: cannot bet');
   const r2 = await act('C', { type: 'rebuy', amount: 1000 }); ok(!r2.ok && /frozen/.test(r2.error), 'frozen: cannot add chips to a table');
-  const rp = await loan('C', 'repay'); const rb = await act('C', { type: 'bet', pid: 1, amount: 50 }); ok(rp.ok && rb.ok, 'after repaying C can play again');
+  const rp = await loan('C', 'repay'); const rb = await act('C', { type: 'bet', pid: 1, amount: 500 }); ok(rp.ok && rb.ok, 'after repaying C can play again');
 }
 // front routes + lockdown
 resetLockCache();

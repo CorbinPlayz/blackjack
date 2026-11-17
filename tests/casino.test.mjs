@@ -1,5 +1,6 @@
 // Step 4: the casino pot, max bets, the 5% dealer cut, and the pot running dry. Needs ./w.mjs (copy of worker/src/index.js).
-import { Registry, Room, resetLockCache } from './w.mjs';
+import { Registry, Room, resetLockCache, _setStartGrant } from './w.mjs';
+_setStartGrant(100000);
 import Front from './w.mjs';
 import assert from 'node:assert';
 let n = 0; const ok = (x, m) => { assert.ok(x, m); n++; console.log('PASS', m); };
@@ -34,8 +35,8 @@ ok(conserved(), 'invariant: accounts + seats + pot == supply');
 
 // ---- max bet ----
 await call('/bank/mint', { ref: ref.B, amount: 90000000, note: 'test' });   // $900,000 + the $1,000 grant (the grant is created by the mint call below via /vault/get)
-let r = await act('CAS01', 'B', { type: 'seat', buyin: 600000 });
-ok(r.ok, 'a player buys in for $6,000');
+let r = await act('CAS01', 'B', { type: 'seat', buyin: 900000 });
+ok(r.ok, 'a player buys in for $9,000');
 r = await act('CAS01', 'C', { type: 'seat', buyin: 20000 });   // a second player who has not bet yet, so the dealer waits (no clocks) and the wagers below are not dealt at once
 ok(r.ok, 'a second player sits down');
 r = await act('CAS01', 'B', { type: 'bet', pid: 1, amount: 250000 });
@@ -44,13 +45,13 @@ r = await act('CAS01', 'B', { type: 'bet', pid: 1, amount: 200000 });
 ok(r.ok && table('CAS01').players[0].bet === 200000, 'a bet at the max is accepted');
 r = await act('CAS01', 'B', { type: 'bet', pid: 1, amount: 0 });
 // the max bet follows the pot
-const c = regSt.m.get('casino'); const was = c.pot; c.pot = 5000; regSt.m.set('casino', c); regSt.m.set('supply', supply() - (was - 5000));   // test-only: shrink the pot (and the supply with it)
-r = await act('CAS01', 'B', { type: 'bet', pid: 1, amount: 200 });
-ok(r._s === 400 && /\$1\b/.test(r.error), 'the max bet shrinks with the pot: ' + r.error);
-r = await act('CAS01', 'B', { type: 'bet', pid: 1, amount: 100 });
-ok(r.ok && table('CAS01').maxBet === 100, 'a bet within the smaller cap works');
+const c = regSt.m.get('casino'); const was = c.pot; c.pot = 50000; regSt.m.set('casino', c); regSt.m.set('supply', supply() - (was - 50000));   // test-only: shrink the pot (and the supply with it)
+r = await act('CAS01', 'B', { type: 'bet', pid: 1, amount: 2000 });
+ok(r._s === 400 && /\$10\b/.test(r.error), 'the max bet shrinks with the pot: ' + r.error);
+r = await act('CAS01', 'B', { type: 'bet', pid: 1, amount: 1000 });
+ok(r.ok && table('CAS01').maxBet === 1000, 'a bet within the smaller cap works');
 r = await act('CAS01', 'B', { type: 'bet', pid: 1, amount: 0 });
-c.pot = was; regSt.m.set('casino', c); regSt.m.set('supply', supply() + (was - 5000));
+c.pot = was; regSt.m.set('casino', c); regSt.m.set('supply', supply() + (was - 50000));
 ok(conserved(), 'invariant still holds');
 
 // ---- real rounds move money through the pot ----
@@ -66,7 +67,7 @@ for (let i = 0; i < 6; i++) {
     if (D.phase === 'acting') { await act('CAS01', 'B', { type: 'stand', pid: 1 }); }
     else if (D.phase === 'insurance') { await act('CAS01', 'B', { type: 'insure', pid: 1, take: false }); }
     else if (D.phase === 'results') break;
-    else { D.deadline = 1; D.startedAt = 1; room('CAS01').st.m.set('table', t); await room('CAS01').obj.fetch(new Request('https://room/state', { headers: { 'X-Code': 'CAS01' } })); }
+    else { D.deadline = 1; D.startedAt = 1; if (D.dealAt) D.dealAt = 1; room('CAS01').st.m.set('table', t); await room('CAS01').obj.fetch(new Request('https://room/state', { headers: { 'X-Code': 'CAS01' } })); }
   }
   const after = { seat: table('CAS01').players[0].balance, pot: pot() };
   assert.ok(after.pot - before.pot === -(after.seat - before.seat), 'round ' + i + ': what the player won came out of the pot (and losses went in): seat ' + before.seat + '->' + after.seat + ', pot ' + before.pot + '->' + after.pot);
@@ -129,8 +130,10 @@ ok((await bal('A')) === a3 && conserved(), 'no cut when the casino lost money at
   const a0 = await bal('A');
   let rr = await hostAct({ type: 'seat', buyin: 10000 });
   ok(rr.ok && (await bal('A')) === a0 - 10000 && table('CAS20').players[0].owner === ref.A, 'the host takes a seat at their own online dealer table, paid from their bank account');
-  rr = await hostAct({ type: 'bet', pid: 1, amount: 5000 });
-  ok(rr.ok && table('CAS20').players[0].hands.length === 1, 'and can place a wager like any player (the hand is dealt at once)');
+  rr = await hostAct({ type: 'bet', pid: 1, amount: 2500 });
+  ok(rr.ok && table('CAS20').deal.dealAt > 0, 'and can place a wager like any player (the deal follows the 5-second countdown)');
+  { const tt = table('CAS20'); tt.deal.dealAt = 1; room('CAS20').st.m.set('table', tt); await room('CAS20').obj.fetch(new Request('https://room/state', { headers: { 'X-Code': 'CAS20' } })); }
+  ok(table('CAS20').players[0].hands.length === 1, 'and then the hand is dealt');
   rr = await hostAct({ type: 'settle', pid: 1, outcome: 'win' });
   ok(rr._s === 400, 'but still cannot settle their own hand (the server dealer does that)');
   ok(conserved(), 'invariant holds');
