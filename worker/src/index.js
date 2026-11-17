@@ -82,8 +82,91 @@ function histPush(t, p, outcome, wager, delta) {
   if (t.history.length > HISTORY_MAX) t.history.shift();
 }
 
+// ================= ROULETTE (American wheel: 0 and 00) =================
+// A roulette table is an online dealer table with settings.game = 'roulette'. Seats, buy-ins, bank and casino pot work exactly as at blackjack.
+// Pockets are 0..36 and 37 (= "00"). Betting windows last 30 seconds, then the wheel spins and the results show for 8 seconds.
+// Bets stay on a player's own chips until the spin, then every bet is settled at once (net win goes in/out of the casino pot through house/hs).
+const ROUL_WINDOW_MS = 30000, ROUL_RESULT_MS = 8000, ROUL_MAX_BETS = 40, ROUL_HIST = 20;
+const RED = new Set([1, 3, 5, 7, 9, 12, 14, 16, 18, 19, 21, 23, 25, 27, 30, 32, 34, 36]);
+export const roulColor = n => n === 0 || n === 37 ? 'green' : RED.has(n) ? 'red' : 'black';
+export const roulLabel = n => n === 37 ? '00' : String(n);
+const ROUL_MULT = { num: 35, split: 17, street: 11, corner: 8, dozen: 2, col: 2, red: 1, black: 1, odd: 1, even: 1, low: 1, high: 1 };
+const SPLITS0 = [[0, 1], [0, 2], [37, 2], [37, 3], [0, 37]];
+const range = (a, b) => { const r = []; for (let i = a; i <= b; i++) r.push(i); return r; };
+// The pockets a bet covers, or null if it is not a real bet on the layout (3 columns x 12 rows; 0 and 00 sit above).
+export function roulCover(k, sel) {
+  sel = Array.isArray(sel) ? sel : [];
+  const ints = sel.every(x => Number.isInteger(x));
+  if (!ints || !Object.prototype.hasOwnProperty.call(ROUL_MULT, k)) return null;
+  const inN = x => x >= 0 && x <= 37;
+  if (k === 'num') return sel.length === 1 && inN(sel[0]) ? [sel[0]] : null;
+  if (k === 'split') {
+    if (sel.length !== 2) return null;
+    const [a, b] = sel[0] < sel[1] ? sel : [sel[1], sel[0]];
+    if (SPLITS0.some(x => (x[0] === a && x[1] === b) || (x[0] === b && x[1] === a))) return [a, b];
+    if (a < 1 || b > 36) return null;
+    const ra = Math.floor((a - 1) / 3), rb = Math.floor((b - 1) / 3);
+    if ((b - a === 3) || (b - a === 1 && ra === rb)) return [a, b];
+    return null;
+  }
+  if (k === 'street') { if (sel.length !== 1 || sel[0] < 1 || sel[0] > 34 || (sel[0] - 1) % 3 !== 0) return null; return [sel[0], sel[0] + 1, sel[0] + 2]; }
+  if (k === 'corner') { const n = sel[0]; if (sel.length !== 1 || n < 1 || n > 32 || n % 3 === 0) return null; return [n, n + 1, n + 3, n + 4]; }
+  if (k === 'dozen') { if (sel.length !== 1 || sel[0] < 1 || sel[0] > 3) return null; return range((sel[0] - 1) * 12 + 1, sel[0] * 12); }
+  if (k === 'col') { if (sel.length !== 1 || sel[0] < 1 || sel[0] > 3) return null; return range(1, 36).filter(n => (n - 1) % 3 === sel[0] - 1); }
+  if (sel.length) return null;
+  const all = range(1, 36);
+  if (k === 'red') return all.filter(n => RED.has(n));
+  if (k === 'black') return all.filter(n => !RED.has(n));
+  if (k === 'odd') return all.filter(n => n % 2 === 1);
+  if (k === 'even') return all.filter(n => n % 2 === 0);
+  if (k === 'low') return range(1, 18);
+  return range(19, 36);
+}
+// What the bets pay when `num` comes up: stakes back on winners plus winnings (the stake of a loser is simply not returned).
+export function roulPayout(bets, num) {
+  let pay = 0;
+  for (const b of bets) { const c = roulCover(b.k, b.sel); if (c && c.includes(num)) pay += b.a * (ROUL_MULT[b.k] + 1); }
+  return pay;
+}
+const roulStake = bets => bets.reduce((n, b) => n + b.a, 0);
+// The most a set of bets can win (net) on a single spin.
+export function roulMaxWin(bets) { let m = 0; const st = roulStake(bets); for (let n = 0; n <= 37; n++) m = Math.max(m, roulPayout(bets, n) - st); return m; }
+export function roulNormBets(x) {
+  return (Array.isArray(x) ? x : []).slice(0, ROUL_MAX_BETS).filter(b => b && typeof b.k === 'string' && Number.isInteger(b.a) && b.a > 0 && roulCover(b.k, b.sel)).map(b => ({ k: b.k, sel: b.sel.slice(0, 2), a: b.a }));
+}
+export function roulNormTable(r) {
+  r = r && typeof r === 'object' ? r : {};
+  return { phase: r.phase === 'results' ? 'results' : 'betting', closeAt: nn(r.closeAt), nextAt: nn(r.nextAt), n: Math.max(1, nn(r.n)), num: Number.isInteger(r.num) && r.num >= 0 && r.num <= 37 ? r.num : -1,
+    hist: (Array.isArray(r.hist) ? r.hist : []).filter(x => Number.isInteger(x) && x >= 0 && x <= 37).slice(0, ROUL_HIST) };
+}
+function rouletteAdvance(t, now, rand) {
+  const R = t.roul; let ch = false;
+  if (!t.players.length) { if (R.closeAt || R.phase !== 'betting') { R.phase = 'betting'; R.closeAt = 0; R.nextAt = 0; ch = true; } return ch; }
+  if (R.phase === 'results') {
+    if (now < R.nextAt) return false;
+    R.phase = 'betting'; R.closeAt = now + ROUL_WINDOW_MS; R.nextAt = 0; t.players.forEach(p => { p.rb = []; p.rl = null; }); return true;
+  }
+  if (!R.closeAt) { R.closeAt = now + ROUL_WINDOW_MS; ch = true; }
+  if (now < R.closeAt) return ch;
+  const bettors = t.players.filter(p => p.rb.length);
+  if (!bettors.length) { R.closeAt = now + ROUL_WINDOW_MS; return true; }       // nobody bet: the window simply opens again
+  const num = (rand || randInt)(38);
+  bettors.forEach(p => {
+    const stake = roulStake(p.rb);
+    if (stake > p.balance) { p.rl = { net: 0, stake, pay: 0, void: true }; p.rb = []; return; }       // the chips are no longer there: the bets are void
+    const pay = roulPayout(p.rb, num), net = pay - stake;
+    p.balance += net; t.house -= net; p.rrep = p.rb.map(b => ({ k: b.k, sel: b.sel.slice(), a: b.a }));
+    p.rl = { net, stake, pay, void: false };
+    histPush(t, p, net > 0 ? 'win' : net < 0 ? 'lose' : 'push', stake, net);
+  });
+  R.num = num; R.n += 1; R.hist.unshift(num); R.hist = R.hist.slice(0, ROUL_HIST);
+  R.phase = 'results'; R.nextAt = now + ROUL_RESULT_MS; R.closeAt = 0;
+  return true;
+}
+
 export function advance(t, secret, now, rand) {
   if (!t.settings.auto) return false;
+  if (t.settings.game === 'roulette') return rouletteAdvance(t, now, rand);
   const D = t.deal;
   let changed = false;
   const draw = () => { if (!secret.shoe.length) secret.shoe = newShoe(rand); return secret.shoe.pop(); };
@@ -239,6 +322,7 @@ const nn = n => Number.isInteger(n) && n > 0 ? n : 0;
 const isCard = c => Number.isInteger(c) && c >= 0 && c < 52;
 const newPlayer = (id, name, start, owner) => {
   const p = { id, name, start, balance: start, added: 0, takes: 0, bet: 0, hand: 0, doubled: false, out: false, last: 0, trivia: 0, triviaAt: -1, vin: 0, vout: 0, hands: [], ins: 0, insDone: false, until: 0, idle: 0 };
+  p.rb = []; p.rrep = []; p.rl = null;
   if (owner) p.owner = owner;
   return p;
 };
@@ -255,7 +339,9 @@ export function normalizeTable(t) {
       hands: (Array.isArray(p.hands) ? p.hands : []).slice(0, 2).map(h => ({     // online dealer: this seat's cards (public: everyone sees them)
         cards: (Array.isArray(h && h.cards) ? h.cards : []).filter(isCard).slice(0, 12), bet: nn(h && h.bet), doubled: !!h && h.doubled === true,
         done: !!h && h.done === true, bj: !!h && h.bj === true, res: h && typeof h.res === 'string' ? h.res.slice(0, 12) : '', net: h && Number.isInteger(h.net) ? h.net : 0 })),
-      ins: nn(p.ins), insDone: p.insDone === true, until: nn(p.until), idle: nn(p.idle) };
+      ins: nn(p.ins), insDone: p.insDone === true, until: nn(p.until), idle: nn(p.idle),
+      rb: roulNormBets(p.rb), rrep: roulNormBets(p.rrep),      // roulette: this spin's bets (kept on the player's chips until the spin) and the previous spin's, for Repeat
+      rl: p.rl && typeof p.rl === 'object' ? { net: Number.isInteger(p.rl.net) ? p.rl.net : 0, stake: nn(p.rl.stake), pay: nn(p.rl.pay), void: p.rl.void === true } : null };
     if (typeof p.owner === 'string' && p.owner) q.owner = p.owner;
     return q;
   });
@@ -280,6 +366,7 @@ export function normalizeTable(t) {
     deal: { phase: ['betting', 'insurance', 'acting', 'results'].includes(dl.phase) ? dl.phase : 'betting', startedAt: nn(dl.startedAt), deadline: nn(dl.deadline), dealAt: nn(dl.dealAt), next: dl.next === true,
       cards: (Array.isArray(dl.cards) ? dl.cards : []).filter(isCard).slice(0, 12), hole: dl.hole === true, shoeLeft: nn(dl.shoeLeft), dealerBJ: dl.dealerBJ === true },   // the dealer's PUBLIC cards (the hole card is not here)
     round: { n: Number.isInteger(rd.n) && rd.n > 0 ? rd.n : 1, phase: rd.phase === 'playing' ? 'playing' : 'betting' },
+    roul: roulNormTable(t.roul),
     dealer: typeof t.dealer === 'string' && REF_RE.test(t.dealer) ? t.dealer : '',          // '' = the host deals
     dealerReq: typeof t.dealerReq === 'string' && REF_RE.test(t.dealerReq) ? t.dealerReq : '',
     settings: { locked: st.locked === true, maxBuyin: isCents(st.maxBuyin) ? st.maxBuyin : 0,
@@ -288,6 +375,7 @@ export function normalizeTable(t) {
       triviaPct: Number.isInteger(st.triviaPct) && st.triviaPct >= 0 && st.triviaPct <= 20 ? st.triviaPct : 10, // trivia can pay up to this % of each player's buy-in
       rounds: st.rounds === false ? false : true,
       auto: st.auto === true,                                // the server deals (online dealer table)
+      game: st.game === 'roulette' ? 'roulette' : 'blackjack',
       autoBet: st.autoBet === false ? false : true },        // repeat each player's last wager for the next round (they can still change it)          // rounds: wagers -> dealer Start -> hands -> next round
   };
 }
@@ -322,6 +410,39 @@ function applyCore(t, actor, a, ctx, ops) {
   const NOT_YOURS = 'You can only change your own chips.';
   if (!a || typeof a !== 'object') return deny('Unknown action.');
   if (!dealerPower && t.settings.locked) return deny('The host has paused the table.');
+  if (t.settings.game === 'roulette') {
+    advance(t, ctx.secret, now, ctx.rand);
+    if (['rbet', 'rclear', 'rundo', 'rrepeat'].includes(a.type)) {
+      const p = t.players.find(q => mine(q));
+      if (!p) return deny('Take a seat first.');
+      if (t.roul.phase !== 'betting') return deny('The wheel is spinning. Bets open again in a moment.');
+      if (Number.isInteger(ctx.pot)) t.maxBet = maxBetFor(ctx.pot);
+      if (a.type === 'rclear') { p.rb = []; return { ok: true }; }
+      if (a.type === 'rundo') { p.rb.pop(); return { ok: true }; }
+      let next;
+      if (a.type === 'rrepeat') {
+        if (!p.rrep.length) return deny('You have no previous bets to repeat.');
+        next = p.rrep.map(b => ({ k: b.k, sel: b.sel.slice(), a: b.a }));
+      } else {
+        if (!roulCover(a.k, a.sel)) return deny('That is not a bet on the table.');
+        if (!Number.isInteger(a.a) || a.a <= 0) return deny('Pick a chip first.');
+        if (p.rb.length >= ROUL_MAX_BETS) return deny('That is a lot of bets. Clear some first.');
+        next = p.rb.map(b => ({ k: b.k, sel: b.sel.slice(), a: b.a }));
+        const same = next.find(b => b.k === a.k && b.sel.join(',') === a.sel.join(','));
+        if (same) same.a += a.a; else next.push({ k: a.k, sel: a.sel.slice(), a: a.a });
+      }
+      const stake = roulStake(next);
+      if (!ctx.noLimits) {
+        if (next.some(b => b.a < Math.min(MIN_BET, p.balance))) return deny('The smallest bet is ' + fmt(MIN_BET) + '.');
+        if (stake > betCap(p)) return deny('You can bet at most ' + BET_BAL_PCT + '% of your chips on one spin (' + fmt(betCap(p)) + ').');
+      }
+      if (stake > p.balance) return deny('You only have ' + fmt(p.balance) + ' in chips.');
+      if (roulMaxWin(next) > t.maxBet) return deny('The casino pays at most ' + fmt(t.maxBet) + ' on one spin (' + MAX_BET_PCT + '% of its pot). Lower your bets.');
+      p.rb = next;
+      return { ok: true };
+    }
+    if (['bet', 'hit', 'stand', 'double', 'split', 'insure', 'next', 'sitout', 'start', 'finish', 'settle', 'undo', 'add', 'dealer_request', 'dealer_cancel', 'dealer_reject', 'dealer_accept', 'dealer_set'].includes(a.type)) return deny('This is a roulette table.');
+  } else if (['rbet', 'rclear', 'rundo', 'rrepeat'].includes(a.type)) return deny('This is not a roulette table.');
   if (auto) {
     advance(t, ctx.secret, now, ctx.rand);
     if (['start', 'finish', 'settle', 'insurance', 'undo', 'add', 'dealer_request', 'dealer_cancel', 'dealer_reject', 'dealer_accept', 'dealer_set'].includes(a.type)) return deny('The online dealer runs this table.');
@@ -383,7 +504,7 @@ function applyCore(t, actor, a, ctx, ops) {
       if (funded) {
         if (account < a.buyin) return deny('Not enough money in your bank account (' + fmt(account) + ').');
         t.players.push(newPlayer(t.nextId++, name, a.buyin, actor.ref));
-        if (auto) { const np = t.players[t.players.length - 1]; np.out = true; np.fresh = true; }      // a new player sits out until they place a bet, so nobody is dealt in by surprise
+        if (auto && t.settings.game !== 'roulette') { const np = t.players[t.players.length - 1]; np.out = true; np.fresh = true; }      // a new player sits out until they place a bet, so nobody is dealt in by surprise
         t.funded += a.buyin;
         bankOp(actor.ref, -a.buyin, 'buyin', 'Bought in at a table');
         return { ok: true, vault: -a.buyin, vaultRef: actor.ref };
@@ -930,12 +1051,13 @@ export default {
     // Create a table: find an unused code, claim it, return the host's secret token.
     if (!m[1]) {
       if (request.method !== 'POST') return json({ error: 'method not allowed' }, 405);
+      let game = 'blackjack'; try { const cb = JSON.parse((await request.text()) || '{}'); if (cb && cb.game === 'roulette') game = 'roulette'; } catch (e) { game = 'blackjack'; }
       for (let i = 0; i < 8; i++) {
         const code = randomString(5, CODE_CHARS);
         const token = randomString(32, 'abcdefghijklmnopqrstuvwxyz0123456789');
         const stub = env.ROOM.get(env.ROOM.idFromName(code));
-        const r = await stub.fetch('https://room/init', { method: 'POST', headers: { 'X-Ref': who.ref || '' }, body: JSON.stringify({ token }) });
-        if (r.status === 200) return json({ code, token });
+        const r = await stub.fetch('https://room/init', { method: 'POST', headers: { 'X-Ref': who.ref || '' }, body: JSON.stringify({ token, game }) });
+        if (r.status === 200) return json({ code, token, game });
       }
       return json({ error: 'could not allocate a table' }, 503);
     }
@@ -1044,11 +1166,11 @@ export class Room {
 
     if (path === '/init') {
       if (live) return json({ error: 'taken' }, 409);
-      const { token } = await request.json();
+      const { token, game } = await request.json();
       await this.state.storage.put('meta', { token, v: 0, updated: now, born: now });
       let ci = {}; try { ci = await (await reg(this.env, '/casino/get', {})).json(); } catch (e) { ci = {}; }
       const hostRef = REF_RE.test(request.headers.get('X-Ref') || '') ? request.headers.get('X-Ref') : '';
-      await this.state.storage.put('table', { players: [], history: [], hostRef, potStart: ci.pot || 0, epoch: ci.epoch || 0, maxBet: maxBetFor(ci.pot || 0) || DEFAULT_MAX_BET, settings: { auto: true, rounds: true } });   // new tables are online dealer tables
+      await this.state.storage.put('table', { players: [], history: [], hostRef, potStart: ci.pot || 0, epoch: ci.epoch || 0, maxBet: maxBetFor(ci.pot || 0) || DEFAULT_MAX_BET, settings: { auto: true, rounds: true, game: game === 'roulette' ? 'roulette' : 'blackjack' } });   // new tables are online dealer tables
       return json({ ok: true });
     }
 
@@ -1065,12 +1187,12 @@ export class Room {
       let accName = ''; try { accName = decodeURIComponent(request.headers.get('X-Name') || ''); } catch (e) { accName = ''; }
       const act = body && body.action;
       let account;                                     // bank account balance, only fetched when an action spends from it
-      if (act && ref && ['seat', 'rebuy', 'vault_withdraw', 'vault_deposit', 'bet', 'remove'].includes(act.type)) {      // an overdue loan freezes the account: no playing, no cashing out, repaying is still allowed
+      if (act && ref && ['seat', 'rebuy', 'vault_withdraw', 'vault_deposit', 'bet', 'rbet', 'rrepeat', 'remove'].includes(act.type)) {      // an overdue loan freezes the account: no playing, no cashing out, repaying is still allowed
         let fz = false; try { fz = (await (await reg(this.env, '/vault/get', { ref })).json()).frozen === true; } catch (e) { fz = false; }
         if (fz) return json({ ok: false, error: 'Your account is frozen until your loan is repaid. Repay it on the Me tab.' }, 400);
       }
       if (act && ref && ['seat', 'rebuy', 'vault_withdraw'].includes(act.type)) account = (await (await reg(this.env, '/vault/get', { ref })).json()).balance;
-      let pot; if (act && act.type === 'bet' && table.settings.auto) { try { pot = (await (await reg(this.env, '/casino/get', {})).json()).pot; } catch (e) { pot = undefined; } }
+      let pot; if (act && (act.type === 'bet' || act.type === 'rbet' || act.type === 'rrepeat') && table.settings.auto) { try { pot = (await (await reg(this.env, '/casino/get', {})).json()).pot; } catch (e) { pot = undefined; } }
       const res = applyAction(table, { role: isHost ? 'host' : 'player', ref }, act, { funded: true, account, secret, now, name: accName, pot });
       if (!res.ok) return json({ ok: false, error: res.error }, 400);
       let vaultBalance;
@@ -1112,6 +1234,7 @@ export class Room {
       players: [], history: [], house: 0, hs: 0, funded: 0,       // no free chips: everyone sits down with money from their own bank account
     }));
     const cur = normalizeTable(await this.state.storage.get('table'));
+    seed.settings.game = cur.settings.game;
     seed.hostRef = cur.hostRef; seed.potStart = cur.potStart; seed.epoch = cur.epoch; seed.maxBet = cur.maxBet;
     await this.state.storage.put('table', seed);
     await this.state.storage.put('meta', { token: live.token, v: 1, updated: now, born: live.born });
