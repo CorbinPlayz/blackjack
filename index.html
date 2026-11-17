@@ -292,6 +292,14 @@
   #lockdown { position: fixed; inset: 0; z-index: 99999; display: none; flex-direction: column; align-items: center; justify-content: center; text-align: center; padding: 24px; overflow: hidden; color: #fff;
     background: radial-gradient(ellipse at 50% 25%, #35104d 0%, #12031f 55%, #05010a 100%); }
   #lockdown.on { display: flex; }
+  .qm { width: 26px; height: 26px; min-height: 0; padding: 0; margin-left: 8px; border-radius: 50%; border: 1px solid var(--line); background: transparent; color: var(--muted); font-size: 14px; font-weight: 700; line-height: 1; vertical-align: middle; cursor: pointer; }
+  .helptip { background: rgba(255,255,255,.06); border: 1px solid var(--line); border-radius: 12px; padding: 10px 12px; margin: 0 0 12px; font-size: 14px; color: var(--text); }
+  .helptip b { color: var(--gold, #ffd000); }
+  #welcomePanel ol { margin: 0 0 12px; padding-left: 22px; font-size: 16px; line-height: 1.5; }
+  #welcomePanel li { margin-bottom: 6px; }
+  .choice { border: 1px solid var(--line); border-radius: 14px; padding: 14px; margin-bottom: 12px; }
+  .choice h3 { margin: 0 0 4px; font-size: 18px; }
+  .choice .online-status { margin-bottom: 8px; }
   #lockdown > * { position: relative; z-index: 1; }
   .ld-title { font-size: clamp(36px, 10vw, 68px); font-weight: 900; line-height: 1.05; letter-spacing: 2px; color: #ff4fc3; text-shadow: 0 0 6px #ff4fc3, 0 0 18px #ff2fb3, 0 0 44px #c0007a; animation: ldflick 3.4s infinite; }
   .ld-sub { max-width: 420px; margin: 14px 0 0; color: #8ff7ff; font-size: 16px; text-shadow: 0 0 8px #00cfe6; }
@@ -312,6 +320,7 @@
   <p class="ld-small">Your bank account is safe. Nothing can be played, sent or changed until then.</p>
 </div>
 
+<button type="button" class="qm" id="welcomeQ" aria-label="How this works" style="float:right;margin-top:6px">?</button>
 <h1><span class="chip3d" id="chip3d" aria-hidden="true" style="color:inherit"><span class="spin"><i></i><i></i><i></i><i></i><i></i><i></i><i>♠</i></span></span>Blackjack <span>Chip Tracker</span></h1>
 
 <!-- ACCESS GATE (only used when the online service is configured) -->
@@ -341,15 +350,33 @@
 
 <main>
 <section class="tab" id="tab-table" data-tab="table">
+<div class="panel" id="welcomePanel" hidden>
+  <h2>Welcome! How this works</h2>
+  <ol>
+    <li><b>Your chips.</b> You already have a bank account with free starting money. Look under <b>Me</b>.</li>
+    <li><b>Sit at a table.</b> Start a new table, or join a friend's with their 6-letter code. Then tap <b>Take a seat</b> and choose how many chips to bring.</li>
+    <li><b>Bet, then play.</b> Tap a bet amount, then Hit or Stand when it's your turn. Don't want this round? Tap <b>Sit out</b>.</li>
+  </ol>
+  <button type="button" class="btn-add" id="welcomeOk" style="margin-top:0">Got it, let's play</button>
+  <div class="online-status" style="margin:8px 0 0;font-size:12px">Tap the <b>?</b> on any screen for a quick tip. You can bring this back with the ? at the top.</div>
+</div>
 <!-- ONLINE TABLE -->
 <div class="panel" id="onlinePanel">
-  <h2>Online table</h2>
+  <h2>Online table <button type="button" class="qm" data-help="helpTable" aria-label="Help">?</button></h2>
+  <div class="helptip" id="helpTable" hidden><b>Join</b> with a friend's code, or <b>start</b> your own and share the code. At a table: <b>Take a seat</b>, pick a bet, then Hit / Stand / Double. The cards are dealt 5 seconds after everyone has bet, and <b>Sit out</b> skips a round. When you leave, your chips go back to your bank account.</div>
   <div id="onlineOff">
-    <div class="online-status">The dealer hosts. Everyone else joins with the code, takes a seat, and manages only their own chips.</div>
-    <button type="button" class="btn-add" id="hostBtn" style="margin-top:0">Host an online table</button>
-    <div class="row" style="margin-top:10px">
-      <div style="flex:2"><input type="text" id="joinCode" placeholder="Code" inputmode="text" autocomplete="off" autocapitalize="characters" maxlength="6"></div>
-      <div style="flex:1"><button type="button" class="btn-ghost" id="joinBtn" style="width:100%">Join</button></div>
+    <div class="choice">
+      <h3>Join a table</h3>
+      <div class="online-status">Got a code from a friend? Type it here.</div>
+      <div class="row">
+        <div style="flex:2"><input type="text" id="joinCode" placeholder="Code" inputmode="text" autocomplete="off" autocapitalize="characters" maxlength="6"></div>
+        <div style="flex:1"><button type="button" class="btn-add" id="joinBtn" style="width:100%;margin-top:0">Join</button></div>
+      </div>
+    </div>
+    <div class="choice">
+      <h3>Start a table</h3>
+      <div class="online-status">You get a code to share. The casino deals, so nobody has to.</div>
+      <button type="button" class="btn-ghost" id="hostBtn" style="width:100%">Start an online table</button>
     </div>
   </div>
   <div id="onlineOn" hidden>
@@ -388,7 +415,8 @@
 
 <section class="tab" id="tab-board" data-tab="board" hidden>
 <div class="panel" id="lbPanel" hidden>
-  <h2>Leaderboard · net worth</h2>
+  <h2>Leaderboard · net worth <button type="button" class="qm" data-help="helpBoard" aria-label="Help">?</button></h2>
+  <div class="helptip" id="helpBoard" hidden><b>Net worth</b> is your bank account plus chips on a table, minus loans. <b>Profit</b> is what you earned by playing: free money (grants, bonus) does not count.</div>
   <div class="online-status">Bank account plus your own chips on a table. The right-hand number is your profit: free money (welcome grant, admin gifts, trivia) and dealer cuts do not count, and the casino's money never does.</div>
   <div id="lbRows"></div>
 </div>
@@ -406,7 +434,8 @@
 
 <section class="tab" id="tab-me" data-tab="me" hidden>
 <div class="panel" id="vaultPanel" hidden>
-  <h2>Your bank account</h2>
+  <h2>Your bank account <button type="button" class="qm" data-help="helpBank" aria-label="Help">?</button></h2>
+  <div class="helptip" id="helpBank" hidden>This is your <b>real money</b> in the game. Tables take chips from here when you sit down and give them back when you leave. <b>Deposit</b> and <b>Withdraw</b> move chips between this account and your seat (they only work while you are at a table). Running low? Look for the <b>daily bonus</b>.</div>
   <div class="online-status" id="vaultInfo">Chips you save here stay yours between games.</div>
   <div class="online-status" id="bankLedger" style="font-size:12px;line-height:1.5;white-space:pre-line"></div>
   <input type="text" id="vaultAmt" placeholder="Chips $" inputmode="decimal" autocomplete="off">
@@ -422,7 +451,8 @@
 </div>
 
 <div class="panel" id="loanPanel" hidden>
-  <h2>Loans</h2>
+  <h2>Loans <button type="button" class="qm" data-help="helpLoans" aria-label="Help">?</button></h2>
+  <div class="helptip" id="helpLoans" hidden>Need chips? <b>Borrow from the bank</b> (5% interest a day, due in 3 days) or take a <b>friend's offer</b>. Repay in full before the due time, or your account is <b>frozen</b>: no playing or cashing out until you pay. You can only borrow up to half of what you own.</div>
   <div class="online-status" id="loanBanner" hidden></div>
   <div id="loanActive" hidden>
     <div class="online-status" id="loanInfo"></div>
@@ -2058,6 +2088,7 @@ var Core = (function () {
     $('feeInfo').textContent = 'Taking chips from the bank costs a ' + Core.state.settings.bankFee + '% fee, each player can go ' + (Core.state.settings.bankLimit ? Core.state.settings.bankLimit + ' time' + (Core.state.settings.bankLimit === 1 ? '' : 's') : 'as often as they like') + ', and chips taken count against net profit.';
     $('undoBtn').textContent = pr ? 'Undo my last hand' : 'Undo Last Hand';
     toolMsg.hidden = $('toolbar').hidden;
+    if (!online.role) { $('hostFundHint').hidden = true; $('toolbar').hidden = true; toolMsg.hidden = true; $('players').hidden = true; } else $('players').hidden = false;      // before you join or start a table the screen shows only the two choices
     $('hostTools').hidden = online.role !== 'host';
     $('roundsBtn').textContent = 'Rounds: ' + (Core.state.settings.rounds ? 'On' : 'Off');
     $('roundsBtn').hidden = !online.role || isAuto();
@@ -2727,6 +2758,17 @@ var Core = (function () {
   }
   $('vaultSave').addEventListener('click', vaultGo('in'));
   $('vaultTake').addEventListener('click', vaultGo('out'));
+
+  /* ---------- welcome card and ? tips ---------- */
+  var WELCOME_KEY = 'bjWelcome.v1';
+  function showWelcome(on) { $('welcomePanel').hidden = !on; }
+  $('welcomeOk').addEventListener('click', function (e) { e.preventDefault(); lsSet(WELCOME_KEY, '1'); showWelcome(false); });
+  $('welcomeQ').addEventListener('click', function (e) { e.preventDefault(); showTab('table'); showWelcome($('welcomePanel').hidden); window.scrollTo(0, 0); });
+  document.addEventListener('click', function (e) {
+    var t = e.target; if (!t || !t.getAttribute) return; var id = t.getAttribute('data-help'); if (!id) return;
+    e.preventDefault(); var box = $(id); if (box) box.hidden = !box.hidden;
+  });
+  if (!lsGet(WELCOME_KEY)) showWelcome(true);
 
   /* ---------- daily bonus ---------- */
   var bonusData = null;

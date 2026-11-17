@@ -1,0 +1,35 @@
+// Browser test: first-run welcome card, Join/Start choice, ? tips.
+const { chromium } = require('playwright'); const assert = require('assert'); const path = require('path');
+const html = path.resolve(__dirname, '../index.html'); const shots = process.env.SHOTS || '';
+(async () => {
+  const b = await chromium.launch(); let n = 0; const ok = (c, m) => { assert.ok(c, m); n++; console.log('PASS', m); };
+  const ctx = await b.newContext({ viewport: { width: 390, height: 900 }, isMobile: true, hasTouch: true });
+  const p = await ctx.newPage(); const errs = []; p.on('pageerror', e => errs.push(e.message));
+  const J = o => ({ status: 200, headers: { 'content-type': 'application/json', 'access-control-allow-origin': '*' }, body: JSON.stringify(o) });
+  await p.route('**/api/**', r => { const u = new URL(r.request().url()).pathname;
+    if (u === '/api/access/status') return r.fulfill(J({ status: 'approved', ref: 'abcd1234', admin: false }));
+    if (u === '/api/vault') return r.fulfill(J({ balance: 250000, ledger: [] }));
+    if (u === '/api/loans') return r.fulfill(J({ loan: null, frozen: false, balance: 250000, limit: 125000, bankMax: 125000, bankRateBp: 500, bankDays: 3, maxFriendBp: 1000, maxFriendDays: 14, minLoan: 100, offers: [], myOffers: [], lent: [], t: Date.now() }));
+    return r.fulfill(J({})); });
+  await p.route(/accounts\.google|gstatic|googleapis/, r => r.abort());
+  await p.addInitScript(() => { if (!sessionStorage.getItem('seeded')) { sessionStorage.setItem('seeded', '1'); localStorage.setItem('bjDevice.v1', 'q'.repeat(32)); localStorage.setItem('bjAccess.v1', 'approved'); localStorage.setItem('bjRef.v1', 'abcd1234'); localStorage.setItem('bjName.v1', 'Pat'); localStorage.removeItem('bjWelcome.v1'); } });
+  await p.goto('file://' + html); await p.waitForTimeout(1500);
+  ok(await p.locator('#welcomePanel').isVisible() && /Bet, then play/.test(await p.locator('#welcomePanel').innerText()), 'a first-time player sees the 3-step welcome card');
+  ok(await p.locator('#joinBtn').isVisible() && await p.locator('#hostBtn').isVisible() && /Join a table/.test(await p.locator('#onlinePanel').innerText()), 'the table tab offers Join a table or Start a table');
+  if (shots) await p.screenshot({ path: path.join(shots, 'welcome.png'), fullPage: true });
+  await p.locator('#welcomeOk').click(); await p.waitForTimeout(200);
+  ok(await p.locator('#welcomePanel').isHidden(), 'Got it hides the card');
+  await p.reload(); await p.waitForTimeout(1200);
+  ok(await p.locator('#welcomePanel').isHidden(), 'and it stays hidden next time');
+  await p.locator('#welcomeQ').click(); await p.waitForTimeout(200);
+  ok(await p.locator('#welcomePanel').isVisible(), 'the ? at the top brings it back');
+  ok(await p.locator('#helpTable').isHidden(), 'tips start closed');
+  await p.locator('[data-help="helpTable"]').click(); ok(await p.locator('#helpTable').isVisible() && /Sit out/.test(await p.locator('#helpTable').innerText()), 'the table ? opens a tip');
+  await p.locator('[data-help="helpTable"]').click(); ok(await p.locator('#helpTable').isHidden(), 'tap again closes it');
+  await p.locator('#nav button[data-go="me"]').click(); await p.waitForTimeout(800);
+  await p.locator('[data-help="helpBank"]').click(); ok(await p.locator('#helpBank').isVisible(), 'the bank ? opens its tip');
+  await p.locator('[data-help="helpLoans"]').click(); ok(/frozen/.test(await p.locator('#helpLoans').innerText()), 'the loans ? explains the freeze');
+  if (shots) await p.screenshot({ path: path.join(shots, 'me-help.png'), fullPage: true });
+  ok(!errs.length, 'no page errors: ' + errs.join('|'));
+  await b.close(); console.log('ALL', n, 'ONBOARDING UI CHECKS PASSED');
+})().catch(e => { console.error('FAIL', e.message); process.exit(1); });
