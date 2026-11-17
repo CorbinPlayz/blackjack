@@ -1015,6 +1015,11 @@ export default {
       return withCors(await reg(env, '/bank/get', { ref: me.ref }));
     }
 
+    if (url.pathname === '/api/lobby' && request.method === 'GET') {
+      const me = await identify(request, env);
+      if (!me.ok || !me.ref) return json({ error: 'not approved' }, 403);
+      return withCors(await reg(env, '/lobby/list', {}));
+    }
     if (url.pathname === '/api/bonus' && (request.method === 'GET' || request.method === 'POST')) {
       const me = await identify(request, env);
       if (!me.ok || !me.ref) return json({ error: 'not approved' }, 403);
@@ -1130,6 +1135,10 @@ export class Room {
     return { ok: true, balances: j.balances || {} };
   }
 
+  async lobby(code, table) {                          // tell the lobby this table is open (who hosts it, what game, how many are seated); never blocks play
+    try { await reg(this.env, '/lobby/ping', { code, game: table.settings.game, hostRef: table.hostRef || '', seats: table.players.length, maxBet: table.maxBet || 0 }); } catch (e) { /* the lobby is a convenience */ }
+  }
+
   fetch(request) {                                   // one request at a time: the dealer's clock and the players' actions must never interleave
     const run = this.q.then(() => this.handle(request));
     this.q = run.catch(() => {});
@@ -1161,6 +1170,7 @@ export class Room {
         if (!r.ok) return json({ error: 'Try again in a moment.' }, 503);
       }
       await this.state.storage.deleteAll();
+      try { await reg(this.env, '/lobby/close', { code: request.headers.get('X-Code') || '' }); } catch (e) { /* ignore */ }
     }
     const live = meta && !expired ? meta : null;
 
@@ -1205,6 +1215,7 @@ export class Room {
       await this.state.storage.put('table', table);
       await this.state.storage.put('secret', secret);
       await this.state.storage.put('meta', { token: live.token, v, updated: now, born: live.born });
+      if (table.settings.auto) await this.lobby(code, table);
       return json({ ok: true, v, t: now, state: table, delta: res.delta, balance: res.balance, entry: res.entry, playerFound: res.playerFound, fee: res.fee, hand: res.hand, n: res.n, skipped: res.skipped, vaultBalance });
     }
 
@@ -1238,6 +1249,7 @@ export class Room {
     seed.hostRef = cur.hostRef; seed.potStart = cur.potStart; seed.epoch = cur.epoch; seed.maxBet = cur.maxBet;
     await this.state.storage.put('table', seed);
     await this.state.storage.put('meta', { token: live.token, v: 1, updated: now, born: live.born });
+    await this.lobby(code, seed);
     return json({ ok: true, v: 1 });
   }
 }
@@ -1508,6 +1520,24 @@ export class Registry {
         return json({ ok: true, balance: nb, paid: owed });
       }
       return json({ error: 'not found' }, 404);
+    }
+    if (path === '/lobby/ping') {                    // a table reports itself; stale entries (no news for 15 minutes) drop out of the list
+      const code = String(b.code || '');
+      if (!/^[A-Z0-9]{4,6}$/.test(code)) return json({ error: 'bad request' }, 400);
+      const old = await s.get('tb:' + code);
+      await s.put('tb:' + code, { code, game: b.game === 'roulette' ? 'roulette' : 'blackjack', hostRef: REF_RE.test(String(b.hostRef || '')) ? b.hostRef : '', seats: Math.max(0, Math.min(99, b.seats | 0)), maxBet: Math.max(0, b.maxBet | 0), since: old ? old.since : Date.now(), seen: Date.now() });
+      return json({ ok: true });
+    }
+    if (path === '/lobby/close') { await s.delete('tb:' + String(b.code || '')); return json({ ok: true }); }
+    if (path === '/lobby/list') {
+      const now = Date.now(), rows = [];
+      for (const [k, t] of (await s.list({ prefix: 'tb:' })).entries()) {
+        if (now - t.seen > 15 * 60 * 1000) { await s.delete(k); continue; }
+        const host = t.hostRef ? String(((await acctRec(s, t.hostRef)) || {}).name || '') : '';
+        rows.push({ code: t.code, game: t.game, host: host.slice(0, 30), seats: t.seats, maxBet: t.maxBet, since: t.since });
+      }
+      rows.sort((a, c) => c.seats - a.seats || c.since - a.since);
+      return json({ tables: rows.slice(0, 30), t: now });
     }
     if (path === '/bonus/status' || path === '/bonus/claim') {      // daily top-up: $250 once every 24 hours, only while the account holds under $500 (new money, so the supply grows)
       const ref = String(b.ref || '');

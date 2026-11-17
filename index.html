@@ -299,6 +299,12 @@
   #welcomePanel li { margin-bottom: 6px; }
   .choice { border: 1px solid var(--line); border-radius: 14px; padding: 14px; margin-bottom: 12px; }
   .choice h3 { margin: 0 0 4px; font-size: 18px; }
+  .lobby-row { display:flex; align-items:center; gap:10px; padding:10px 0; border-top:1px solid var(--line); }
+  .lobby-row:first-child { border-top:0; }
+  .lobby-row .lt { flex:1; min-width:0; }
+  .lobby-row .lt b { display:block; font-size:16px; }
+  .lobby-row .lt span { color: var(--muted); font-size:13px; }
+  .lobby-row button { min-height:44px; padding:0 18px; }
   .choice .online-status { margin-bottom: 8px; }
   .rou-hist { display:flex; gap:5px; flex-wrap:wrap; margin:8px 0; }
   .rn { min-width:30px; height:30px; padding:0 4px; border-radius:50%; display:inline-flex; align-items:center; justify-content:center; font-weight:800; font-size:13px; color:#fff; border:0; }
@@ -385,8 +391,13 @@
   <h2>Online table <button type="button" class="qm" data-help="helpTable" aria-label="Help">?</button></h2>
   <div class="helptip" id="helpTable" hidden><b>Join</b> with a friend's code, or <b>start</b> your own and share the code. At a table: <b>Take a seat</b>, pick a bet, then Hit / Stand / Double. The cards are dealt 5 seconds after everyone has bet, and <b>Sit out</b> skips a round. When you leave, your chips go back to your bank account.</div>
   <div id="onlineOff">
+    <div class="choice" id="lobbyBox">
+      <h3>Casino floor</h3>
+      <div class="online-status" id="lobbyEmpty">No tables are open right now. Start one below and friends will see it here.</div>
+      <div id="lobbyRows"></div>
+    </div>
     <div class="choice">
-      <h3>Join a table</h3>
+      <h3>Join with a code</h3>
       <div class="online-status">Got a code from a friend? Type it here.</div>
       <div class="row">
         <div style="flex:2"><input type="text" id="joinCode" placeholder="Code" inputmode="text" autocomplete="off" autocapitalize="characters" maxlength="6"></div>
@@ -2091,6 +2102,7 @@ var Core = (function () {
     renderTabs();
     if (n === 'admin') adminLoad();
     if (n === 'me') { refreshVault(true); loadLoans(); loadBonus(); }
+    if (n === 'table') loadLobby(true);
     if (n === 'board') loadBoard(true);
     try { window.scrollTo(0, 0); } catch (e) {}
   }
@@ -2892,6 +2904,29 @@ var Core = (function () {
     var sel = t.getAttribute('data-sel'); rouPlace(t.getAttribute('data-k'), sel ? sel.split(',').map(Number) : []);
   });
 
+  /* ---------- casino floor: the open tables ---------- */
+  var lobbyAt = 0;
+  function loadLobby(force) {
+    if (!ONLINE_URL || !myRef || online.role) return;
+    var now = Date.now(); if (!force && now - lobbyAt < 4000) return; lobbyAt = now;
+    api('/api/lobby').then(function (r) { return r.ok ? r.json() : null; }).then(function (d) {
+      if (!d || !Array.isArray(d.tables)) return;
+      var box = $('lobbyRows'); box.innerHTML = ''; $('lobbyEmpty').hidden = d.tables.length > 0;
+      d.tables.forEach(function (t) {
+        var row = el('div', 'lobby-row'), lt = el('div', 'lt');
+        lt.appendChild(el('b', null, (t.game === 'roulette' ? '🎡 Roulette' : '♠ Blackjack') + ' · ' + t.code));
+        lt.appendChild(el('span', null, (t.host ? t.host + "'s table · " : '') + (t.seats === 1 ? '1 player' : t.seats + ' players') + (t.maxBet ? ' · max bet ' + Core.fmt(t.maxBet) : '')));
+        var b = el('button', 'btn-add', 'Sit down'); b.type = 'button'; b.setAttribute('data-lobby', t.code); b.style.marginTop = '0';
+        row.appendChild(lt); row.appendChild(b); box.appendChild(row);
+      });
+    }).catch(function () {});
+  }
+  document.addEventListener('click', function (e) {
+    var t = e.target; if (!t || !t.getAttribute || !t.getAttribute('data-lobby')) return;
+    e.preventDefault(); $('joinCode').value = t.getAttribute('data-lobby'); joinTable();
+  });
+  setInterval(function () { if (curTab === 'table' && !online.role) loadLobby(false); }, 5000);
+
   /* ---------- welcome card and ? tips ---------- */
   var WELCOME_KEY = 'bjWelcome.v1';
   function showWelcome(on) { $('welcomePanel').hidden = !on; }
@@ -2902,6 +2937,7 @@ var Core = (function () {
     e.preventDefault(); var box = $(id); if (box) box.hidden = !box.hidden;
   });
   if (!lsGet(WELCOME_KEY)) showWelcome(true);
+  setTimeout(function () { loadLobby(true); }, 1500);
 
   /* ---------- daily bonus ---------- */
   var bonusData = null;

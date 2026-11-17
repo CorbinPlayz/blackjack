@@ -15,7 +15,7 @@ const html = path.resolve(__dirname, '../index.html'); const shots = process.env
   await p.addInitScript(() => { if (!localStorage.getItem('bjDevice.v1')) { localStorage.setItem('bjDevice.v1', 'q'.repeat(32)); localStorage.setItem('bjAccess.v1', 'approved'); localStorage.setItem('bjRef.v1', 'abcd1234'); localStorage.setItem('bjName.v1', 'Pat'); localStorage.removeItem('bjWelcome.v1'); } });
   await p.goto('file://' + html); await p.waitForTimeout(1500);
   ok(await p.locator('#welcomePanel').isVisible() && /Bet, then play/.test(await p.locator('#welcomePanel').innerText()), 'a first-time player sees the 3-step welcome card');
-  ok(await p.locator('#joinBtn').isVisible() && await p.locator('#hostBtn').isVisible() && /Join a table/.test(await p.locator('#onlinePanel').innerText()), 'the table tab offers Join a table or Start a table');
+  ok(await p.locator('#joinBtn').isVisible() && await p.locator('#hostBtn').isVisible() && /Join with a code/.test(await p.locator('#onlinePanel').innerText()), 'the table tab offers Join a table or Start a table');
   if (shots) await p.screenshot({ path: path.join(shots, 'welcome.png'), fullPage: true });
   await p.locator('#welcomeOk').click(); await p.waitForTimeout(1000);
   ok(await p.locator('#welcomePanel').isHidden(), 'Got it hides the card');
