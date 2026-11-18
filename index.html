@@ -104,6 +104,14 @@
   .outcomes.two button { min-height: 46px; font-size: 14px; }
   .badge { display: inline-block; margin-left: 8px; padding: 2px 8px; border-radius: 999px; background: var(--green); color: #04130a; font-size: 11px; font-weight: 800; letter-spacing: .6px; vertical-align: middle; }
   .player.mine { border-color: var(--green); }
+  .vp-hand { display:flex; gap:6px; margin:12px 0 6px; }
+  .vp-hand button { flex:1; min-width:0; background:none; border:2px solid transparent; border-radius:12px; padding:2px; position:relative; cursor:pointer; color:inherit; font:inherit; }
+  .vp-hand button.held { border-color:#f5c542; }
+  .vp-hand button .hl { position:absolute; left:0; right:0; bottom:-18px; text-align:center; font-size:11px; font-weight:800; color:#f5c542; }
+  .vp-hand .dkc { width:100%; min-width:0; }
+  .vp-res { font-size:18px; font-weight:800; margin:22px 0 4px; }
+  .vp-pay { display:grid; grid-template-columns:1fr auto; gap:2px 12px; font-size:13px; max-width:300px; margin:8px 0; }
+  .vp-pay .on { color:#f5c542; font-weight:800; }
   .rbar { display:flex; align-items:center; justify-content:space-between; gap:10px; flex-wrap:wrap; }
   .rbar .big { font-size:20px; font-weight:800; }
   .rbar .sub2 { color: var(--muted, #9aa59d); font-size:13px; margin-top:2px; }
@@ -409,6 +417,7 @@
       <div class="online-status">You get a code to share. The casino deals, so nobody has to.</div>
       <button type="button" class="btn-ghost" id="hostBtn" style="width:100%">Start a blackjack table</button>
       <button type="button" class="btn-ghost" id="hostRouletteBtn" style="width:100%;margin-top:8px">Start a roulette table</button>
+      <button type="button" class="btn-ghost" id="hostPokerBtn" style="width:100%;margin-top:8px">Start a video poker table</button>
     </div>
   </div>
   <div id="onlineOn" hidden>
@@ -1428,6 +1437,7 @@ var Core = (function () {
       q.trivia = ni(p.trivia); q.triviaAt = Number.isInteger(p.triviaAt) ? p.triviaAt : -1; q.vin = ni(p.vin); q.vout = ni(p.vout);
       q.rb = Array.isArray(p.rb) ? p.rb.filter(function (b) { return b && typeof b.k === 'string' && Array.isArray(b.sel) && Number.isInteger(b.a) && b.a > 0; }).map(function (b) { return { k: b.k, sel: b.sel.slice(0, 2), a: b.a }; }) : [];
       q.rrep = Array.isArray(p.rrep) ? p.rrep.length : 0;
+      q.vp = p.vp && typeof p.vp === 'object' ? { phase: p.vp.phase === 'hold' ? 'hold' : 'idle', hand: Array.isArray(p.vp.hand) ? p.vp.hand.filter(function (c) { return Number.isInteger(c) && c >= 0 && c < 52; }).slice(0, 5) : [], bet: ni(p.vp.bet), res: p.vp.res && typeof p.vp.res === 'object' ? { k: String(p.vp.res.k || 'none'), net: Number.isInteger(p.vp.res.net) ? p.vp.res.net : 0, pay: ni(p.vp.res.pay) } : null } : null;
       q.rl = p.rl && typeof p.rl === 'object' ? { net: Number.isInteger(p.rl.net) ? p.rl.net : 0, stake: ni(p.rl.stake), pay: ni(p.rl.pay), void: p.rl.void === true } : null;
       q.ins = ni(p.ins); q.insDone = p.insDone === true; q.until = ni(p.until);          // online dealer: this seat's cards
       q.hands = Array.isArray(p.hands) ? p.hands.map(function (h) {
@@ -1441,7 +1451,7 @@ var Core = (function () {
     out.settings = { locked: st.locked === true, maxBuyin: Number.isInteger(st.maxBuyin) && st.maxBuyin > 0 ? st.maxBuyin : 0,
       bankFee: Number.isInteger(st.bankFee) && st.bankFee >= 0 && st.bankFee <= 50 ? st.bankFee : 10,
       bankLimit: Number.isInteger(st.bankLimit) && st.bankLimit >= 0 && st.bankLimit <= 20 ? st.bankLimit : 3,
-      triviaPct: Number.isInteger(st.triviaPct) && st.triviaPct >= 0 && st.triviaPct <= 20 ? st.triviaPct : 10, rounds: st.rounds === true, autoBet: st.autoBet !== false, auto: st.auto === true, game: st.game === 'roulette' ? 'roulette' : 'blackjack' };
+      triviaPct: Number.isInteger(st.triviaPct) && st.triviaPct >= 0 && st.triviaPct <= 20 ? st.triviaPct : 10, rounds: st.rounds === true, autoBet: st.autoBet !== false, auto: st.auto === true, game: st.game === 'roulette' || st.game === 'poker' ? st.game : 'blackjack' };
     var dl = s.deal && typeof s.deal === 'object' ? s.deal : null;
     out.deal = dl ? { phase: typeof dl.phase === 'string' ? dl.phase : 'betting', startedAt: Number.isInteger(dl.startedAt) ? dl.startedAt : 0, deadline: Number.isInteger(dl.deadline) ? dl.deadline : 0, dealAt: Number.isInteger(dl.dealAt) ? dl.dealAt : 0,
       cards: Array.isArray(dl.cards) ? dl.cards.filter(function (c) { return Number.isInteger(c) && c >= 0 && c < 52; }) : [], hole: dl.hole === true, dealerBJ: dl.dealerBJ === true } : null;
@@ -1604,6 +1614,7 @@ var Core = (function () {
   var bankLedger = [], vaultBal = null, triviaDeck = [], triviaBank = null;
   function roundsOn() { return !!online.role && !!Core.state.settings.rounds; }
   function isAuto() { return roundsOn() && !!Core.state.settings.auto; }
+  function isPoker() { return isAuto() && Core.state.settings.game === 'poker'; }
   function isRoulette() { return isAuto() && Core.state.settings.game === 'roulette'; }
   var skew = 0;                                                         // server clock minus this device's clock, so countdowns agree
   function noteServerTime(d) { if (d && typeof d.t === 'number') skew = d.t - Date.now(); }
@@ -2242,7 +2253,9 @@ var Core = (function () {
 
       var rmode = roundsOn(), auto = isAuto();
       var inplay = rmode && p.hand > 0;
-      if (isRoulette()) {
+      if (isPoker()) {
+        /* video poker is played in the panel above; nothing to bet on the seat card */
+      } else if (isRoulette()) {
         if (mine && p.rb && p.rb.length) card.appendChild(el('div', 'inplay', 'On the table: ' + Core.fmt(p.rb.reduce(function (n, b) { return n + b.a; }, 0))));
       } else if (ctl && rmode && isDealerSeat(p)) {
         nm.appendChild(el('span', 'badge', 'DEALER'));
@@ -2438,6 +2451,8 @@ var Core = (function () {
       case 'remove': body = { type: 'remove', pid: a.pid }; break;
       case 'rbet': body = { type: 'rbet', k: a.k, sel: a.sel, a: a.a }; break;
       case 'rop': body = { type: a.op }; break;
+      case 'vdeal': body = { type: 'vdeal', a: a.a }; break;
+      case 'vdraw': body = { type: 'vdraw', holds: a.holds }; break;
       case 'undo': body = { type: 'undo' }; break;
       case 'reset': body = { type: 'reset' }; break;
       case 'settings': body = { type: 'settings' }; for (var k in a.settings) body[k] = a.settings[k]; break;
@@ -2619,6 +2634,7 @@ var Core = (function () {
 
   function renderRound() {
     var box = $('roundPanel');
+    if (isPoker()) { renderPoker(box); return; }
     if (isRoulette()) { renderRoulette(box); return; }
     if (isAuto()) { renderDealer(box); return; }
     var on = roundsOn() && Core.state.players.length > 0;
@@ -2837,6 +2853,58 @@ var Core = (function () {
     if (busy) return; busy = true;
     perform({ type: 'rop', op: op }).then(function (res) { rouMsg = res.ok ? '' : res.error; }).then(function () { busy = false; render(); });
   }
+
+  /* ---------- video poker (Jacks or Better) ---------- */
+  var VP_TABLE = [['royal', 'Royal flush', 100], ['sflush', 'Straight flush', 50], ['quads', 'Four of a kind', 25], ['full', 'Full house', 9], ['flush', 'Flush', 6], ['straight', 'Straight', 4], ['trips', 'Three of a kind', 3], ['twopair', 'Two pair', 2], ['jacks', 'Jacks or better', 1]];
+  var VP_NAMES = {}; VP_TABLE.forEach(function (r) { VP_NAMES[r[0]] = r[1]; });
+  var vpChip = 500, vpHolds = [], vpKey = '', vpMsg = '';
+  var VP_CHIPS = [500, 1000, 2500, 5000, 10000];
+  function vpGo(action) {
+    if (busy) return; busy = true;
+    perform(action).then(function (res) { vpMsg = res.ok ? '' : res.error; if (res.ok) fxSafe(function () { sfxSafe('chip'); }); }).then(function () { busy = false; render(); });
+  }
+  function renderPoker(box) {
+    var me = mySeat(), V = me && me.vp, hold = !!(V && V.phase === 'hold');
+    box.hidden = false; box.innerHTML = '';
+    var key = hold ? V.hand.join(',') : '';
+    if (key !== vpKey) { vpKey = key; vpHolds = []; }
+    var vt = el('div', 'big', 'Video poker · Jacks or Better'); vt.style.cssText = 'font-size:20px;font-weight:800'; box.appendChild(vt);
+    if (!me) { box.appendChild(el('div', 'sub2', 'Take a seat to play. You are dealt five cards, keep the ones you like, and draw new ones for the rest.')); }
+    else {
+      if (V && V.hand.length === 5) {
+        var hd = el('div', 'vp-hand');
+        V.hand.forEach(function (c, i) {
+          var b = el('button'); b.type = 'button'; b.setAttribute('data-vpcard', String(i)); b.disabled = !hold;
+          if (vpHolds.indexOf(i) >= 0) { b.className = 'held'; }
+          b.appendChild(cardEl(c)); if (vpHolds.indexOf(i) >= 0) b.appendChild(el('div', 'hl', 'HELD'));
+          hd.appendChild(b);
+        });
+        box.appendChild(hd);
+      } else box.appendChild(el('div', 'sub2', 'Pick a bet and press Deal.'));
+      if (V && V.res && !hold) {
+        var r = el('div', 'vp-res', (VP_NAMES[V.res.k] || 'No win') + (V.res.net > 0 ? ' · +' + Core.fmt(V.res.net) : V.res.net < 0 ? ' · −' + Core.fmt(-V.res.net) : ' · bet back'));
+        r.id = 'vpRes'; box.appendChild(r);
+      } else if (hold) box.appendChild(el('div', 'vp-res', 'Tap the cards to keep, then Draw.'));
+      var chips = el('div', 'rou-chips');
+      VP_CHIPS.forEach(function (c) { var b = el('button', c === vpChip ? 'sel' : '', Core.fmt(c).replace(/\.00$/, '')); b.type = 'button'; b.setAttribute('data-vpchip', String(c)); if (hold) b.disabled = true; chips.appendChild(b); });
+      box.appendChild(chips);
+      var go = el('button', 'btn-add', hold ? 'Draw' : 'Deal ' + Core.fmt(vpChip)); go.type = 'button'; go.id = 'vpGo'; go.style.width = '100%'; go.style.marginTop = '10px'; box.appendChild(go);
+    }
+    var pt = el('div', 'vp-pay');
+    VP_TABLE.forEach(function (r) { var on = Core.state && me && me.vp && me.vp.res && me.vp.res.k === r[0] && !hold; pt.appendChild(el('div', on ? 'on' : null, r[1])); pt.appendChild(el('div', on ? 'on' : null, r[2] + ' to 1')); });
+    box.appendChild(pt);
+    box.appendChild(el('div', 'sub2', 'Up to 25% of your chips per hand, $5 minimum. Pays are multiples of your bet (a bet of 1 comes back on jacks or better).'));
+    var m = el('div', 'msg'); m.id = 'vpMsg'; m.textContent = vpMsg; box.appendChild(m);
+  }
+  document.addEventListener('click', function (e) {
+    var t = e.target; while (t && t !== document && !(t.getAttribute && (t.getAttribute('data-vpcard') || t.getAttribute('data-vpchip') || t.id === 'vpGo'))) t = t.parentNode;
+    if (!t || t === document || !$('roundPanel').contains(t)) return;
+    e.preventDefault();
+    var me = mySeat(), V = me && me.vp;
+    if (t.getAttribute('data-vpcard') !== null && t.getAttribute('data-vpcard') !== '') { var i = parseInt(t.getAttribute('data-vpcard'), 10), at = vpHolds.indexOf(i); if (at >= 0) vpHolds.splice(at, 1); else vpHolds.push(i); render(); return; }
+    if (t.getAttribute('data-vpchip')) { vpChip = parseInt(t.getAttribute('data-vpchip'), 10); render(); return; }
+    if (t.id === 'vpGo') vpGo(V && V.phase === 'hold' ? { type: 'vdraw', holds: vpHolds.slice() } : { type: 'vdeal', a: vpChip });
+  });
   function renderRoulette(box) {
     var t = Core.state, R = t.roul, me = mySeat(), betting = R.phase === 'betting';
     box.hidden = false; box.innerHTML = '';
@@ -2914,7 +2982,7 @@ var Core = (function () {
       var box = $('lobbyRows'); box.innerHTML = ''; $('lobbyEmpty').hidden = d.tables.length > 0;
       d.tables.forEach(function (t) {
         var row = el('div', 'lobby-row'), lt = el('div', 'lt');
-        lt.appendChild(el('b', null, (t.game === 'roulette' ? '🎡 Roulette' : '♠ Blackjack') + ' · ' + t.code));
+        lt.appendChild(el('b', null, (t.game === 'roulette' ? '🎡 Roulette' : t.game === 'poker' ? '🃏 Video poker' : '♠ Blackjack') + ' · ' + t.code));
         lt.appendChild(el('span', null, (t.host ? t.host + "'s table · " : '') + (t.seats === 1 ? '1 player' : t.seats + ' players') + (t.maxBet ? ' · max bet ' + Core.fmt(t.maxBet) : '')));
         var b = el('button', 'btn-add', 'Sit down'); b.type = 'button'; b.setAttribute('data-lobby', t.code); b.style.marginTop = '0';
         row.appendChild(lt); row.appendChild(b); box.appendChild(row);
@@ -3322,7 +3390,7 @@ var Core = (function () {
     if (needUrl()) return;
     setOnlineMsg('Creating table…', true);
     try {
-      var r = await api('/api/rooms', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ game: game === 'roulette' ? 'roulette' : 'blackjack' }) });
+      var r = await api('/api/rooms', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ game: game === 'roulette' || game === 'poker' ? game : 'blackjack' }) });
       if (r.status === 403) { accessLost(); return; }
       if (!r.ok) throw new Error('status ' + r.status);
       var d = await r.json();
@@ -3363,6 +3431,7 @@ var Core = (function () {
 
   $('hostBtn').addEventListener('click', function (e) { e.preventDefault(); hostTable('blackjack'); });
   $('hostRouletteBtn').addEventListener('click', function (e) { e.preventDefault(); hostTable('roulette'); });
+  $('hostPokerBtn').addEventListener('click', function (e) { e.preventDefault(); hostTable('poker'); });
   $('joinBtn').addEventListener('click', function (e) { e.preventDefault(); joinTable(); });
   $('joinCode').addEventListener('keydown', function (e) { if (e.key === 'Enter') { e.preventDefault(); joinTable(); } });
   $('leaveBtn').addEventListener('click', async function (e) {

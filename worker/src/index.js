@@ -164,9 +164,49 @@ function rouletteAdvance(t, now, rand) {
   return true;
 }
 
+// ================= VIDEO POKER (Jacks or Better) =================
+// A poker table is an online table with settings.game = 'poker'. Every player plays alone against the casino pot at their own pace.
+// vdeal takes the stake (into the table house) and deals 5 cards; vdraw replaces the cards you did not hold and pays the hand out of the house.
+// The cards you did not hold are drawn at random from the 47 cards not in your hand, which is exactly what drawing from a shuffled deck does, so no deck has to be stored.
+const VP_PAY = { royal: 100, sflush: 50, quads: 25, full: 9, flush: 6, straight: 4, trips: 3, twopair: 2, jacks: 1 };
+const VP_NAME = { royal: 'Royal flush', sflush: 'Straight flush', quads: 'Four of a kind', full: 'Full house', flush: 'Flush', straight: 'Straight', trips: 'Three of a kind', twopair: 'Two pair', jacks: 'Jacks or better', none: 'No win' };
+export const vpName = k => VP_NAME[k] || VP_NAME.none;
+export const VP_TOP = VP_PAY.royal;
+export function vpEval(hand) {
+  if (!Array.isArray(hand) || hand.length !== 5) return 'none';
+  const rk = hand.map(c => c % 13), flush = hand.every(c => Math.floor(c / 13) === Math.floor(hand[0] / 13));
+  const cnt = {}; rk.forEach(r => { cnt[r] = (cnt[r] || 0) + 1; });
+  const groups = Object.values(cnt).sort((a, b) => b - a);
+  const hi = rk.map(r => r === 0 ? 14 : r + 1).sort((a, b) => a - b), lo = rk.map(r => r + 1).sort((a, b) => a - b);
+  const seq = a => new Set(a).size === 5 && a[4] - a[0] === 4;
+  const straight = seq(hi) || seq(lo);
+  if (straight && flush) return hi[0] === 10 && seq(hi) ? 'royal' : 'sflush';
+  if (groups[0] === 4) return 'quads';
+  if (groups[0] === 3 && groups[1] === 2) return 'full';
+  if (flush) return 'flush';
+  if (straight) return 'straight';
+  if (groups[0] === 3) return 'trips';
+  if (groups[0] === 2 && groups[1] === 2) return 'twopair';
+  if (groups[0] === 2) { const pr = +Object.keys(cnt).find(r => cnt[r] === 2); if (pr === 0 || pr >= 10) return 'jacks'; }
+  return 'none';
+}
+export const vpMult = k => VP_PAY[k] || 0;
+export function vpNorm(v) {
+  if (!v || typeof v !== 'object') return null;
+  const hand = (Array.isArray(v.hand) ? v.hand : []).filter(c => Number.isInteger(c) && c >= 0 && c < 52).slice(0, 5);
+  const r = v.res && typeof v.res === 'object' ? { k: String(v.res.k || 'none'), net: Number.isInteger(v.res.net) ? v.res.net : 0, pay: Number.isInteger(v.res.pay) ? v.res.pay : 0 } : null;
+  return { phase: v.phase === 'hold' && hand.length === 5 ? 'hold' : 'idle', hand, bet: Math.max(0, nn(v.bet)), res: r };
+}
+function vpDraw(excl, n, rand) {
+  const left = []; for (let c = 0; c < 52; c++) if (!excl.includes(c)) left.push(c);
+  const out = []; for (let i = 0; i < n; i++) out.push(left.splice((rand || randInt)(left.length), 1)[0]);
+  return out;
+}
+
 export function advance(t, secret, now, rand) {
   if (!t.settings.auto) return false;
   if (t.settings.game === 'roulette') return rouletteAdvance(t, now, rand);
+  if (t.settings.game === 'poker') return false;
   const D = t.deal;
   let changed = false;
   const draw = () => { if (!secret.shoe.length) secret.shoe = newShoe(rand); return secret.shoe.pop(); };
@@ -322,7 +362,7 @@ const nn = n => Number.isInteger(n) && n > 0 ? n : 0;
 const isCard = c => Number.isInteger(c) && c >= 0 && c < 52;
 const newPlayer = (id, name, start, owner) => {
   const p = { id, name, start, balance: start, added: 0, takes: 0, bet: 0, hand: 0, doubled: false, out: false, last: 0, trivia: 0, triviaAt: -1, vin: 0, vout: 0, hands: [], ins: 0, insDone: false, until: 0, idle: 0 };
-  p.rb = []; p.rrep = []; p.rl = null;
+  p.rb = []; p.rrep = []; p.rl = null; p.vp = null;
   if (owner) p.owner = owner;
   return p;
 };
@@ -340,7 +380,7 @@ export function normalizeTable(t) {
         cards: (Array.isArray(h && h.cards) ? h.cards : []).filter(isCard).slice(0, 12), bet: nn(h && h.bet), doubled: !!h && h.doubled === true,
         done: !!h && h.done === true, bj: !!h && h.bj === true, res: h && typeof h.res === 'string' ? h.res.slice(0, 12) : '', net: h && Number.isInteger(h.net) ? h.net : 0 })),
       ins: nn(p.ins), insDone: p.insDone === true, until: nn(p.until), idle: nn(p.idle),
-      rb: roulNormBets(p.rb), rrep: roulNormBets(p.rrep),      // roulette: this spin's bets (kept on the player's chips until the spin) and the previous spin's, for Repeat
+      vp: vpNorm(p.vp), rb: roulNormBets(p.rb), rrep: roulNormBets(p.rrep),      // roulette: this spin's bets (kept on the player's chips until the spin) and the previous spin's, for Repeat
       rl: p.rl && typeof p.rl === 'object' ? { net: Number.isInteger(p.rl.net) ? p.rl.net : 0, stake: nn(p.rl.stake), pay: nn(p.rl.pay), void: p.rl.void === true } : null };
     if (typeof p.owner === 'string' && p.owner) q.owner = p.owner;
     return q;
@@ -375,7 +415,7 @@ export function normalizeTable(t) {
       triviaPct: Number.isInteger(st.triviaPct) && st.triviaPct >= 0 && st.triviaPct <= 20 ? st.triviaPct : 10, // trivia can pay up to this % of each player's buy-in
       rounds: st.rounds === false ? false : true,
       auto: st.auto === true,                                // the server deals (online dealer table)
-      game: st.game === 'roulette' ? 'roulette' : 'blackjack',
+      game: st.game === 'roulette' || st.game === 'poker' ? st.game : 'blackjack',
       autoBet: st.autoBet === false ? false : true },        // repeat each player's last wager for the next round (they can still change it)          // rounds: wagers -> dealer Start -> hands -> next round
   };
 }
@@ -410,6 +450,40 @@ function applyCore(t, actor, a, ctx, ops) {
   const NOT_YOURS = 'You can only change your own chips.';
   if (!a || typeof a !== 'object') return deny('Unknown action.');
   if (!dealerPower && t.settings.locked) return deny('The host has paused the table.');
+  if (t.settings.game === 'poker') {
+    if (['vdeal', 'vdraw'].includes(a.type)) {
+      const p = t.players.find(q => mine(q));
+      if (!p) return deny('Take a seat first.');
+      if (!p.vp) p.vp = vpNorm({});
+      const V = p.vp, rand = ctx.rand;
+      if (a.type === 'vdeal') {
+        if (V.phase === 'hold') return deny('Finish this hand first: pick your cards and press Draw.');
+        if (!Number.isInteger(a.a) || a.a <= 0) return deny('Pick a bet first.');
+        if (Number.isInteger(ctx.pot)) t.maxBet = maxBetFor(ctx.pot);
+        if (!ctx.noLimits) {
+          if (a.a < Math.min(MIN_BET, p.balance)) return deny('The smallest bet is ' + fmt(MIN_BET) + '.');
+          if (a.a > betCap(p)) return deny('You can bet at most ' + BET_BAL_PCT + '% of your chips on one hand (' + fmt(betCap(p)) + ').');
+        }
+        if (a.a > p.balance) return deny('You only have ' + fmt(p.balance) + ' in chips.');
+        if ((VP_TOP - 1) * a.a > t.maxBet) return deny('The casino pays at most ' + fmt(t.maxBet) + ' on one hand (' + MAX_BET_PCT + '% of its pot), so the biggest bet here is ' + fmt(Math.floor(t.maxBet / (VP_TOP - 1))) + '.');
+        p.balance -= a.a; t.house += a.a;
+        V.hand = vpDraw([], 5, rand); V.bet = a.a; V.phase = 'hold'; V.res = null;
+        return { ok: true };
+      }
+      if (V.phase !== 'hold') return deny('Deal a hand first.');
+      const holds = Array.isArray(a.holds) ? a.holds : [];
+      if (!holds.every(i => Number.isInteger(i) && i >= 0 && i < 5)) return deny('Pick cards from your hand.');
+      const keep = new Set(holds), swap = [0, 1, 2, 3, 4].filter(i => !keep.has(i));
+      const fresh = vpDraw(V.hand, swap.length, rand);
+      swap.forEach((i, j) => { V.hand[i] = fresh[j]; });
+      const k = vpEval(V.hand), pay = V.bet * vpMult(k), net = pay - V.bet;
+      p.balance += pay; t.house -= pay;
+      V.res = { k, net, pay }; V.phase = 'idle';
+      histPush(t, p, net > 0 ? 'win' : net < 0 ? 'lose' : 'push', V.bet, net);
+      return { ok: true };
+    }
+    if (['bet', 'hit', 'stand', 'double', 'split', 'insure', 'next', 'sitout', 'start', 'finish', 'settle', 'undo', 'add', 'rbet', 'rclear', 'rundo', 'rrepeat', 'dealer_request', 'dealer_cancel', 'dealer_reject', 'dealer_accept', 'dealer_set'].includes(a.type)) return deny('This is a video poker table.');
+  } else if (['vdeal', 'vdraw'].includes(a.type)) return deny('This is not a video poker table.');
   if (t.settings.game === 'roulette') {
     advance(t, ctx.secret, now, ctx.rand);
     if (['rbet', 'rclear', 'rundo', 'rrepeat'].includes(a.type)) {
@@ -504,7 +578,7 @@ function applyCore(t, actor, a, ctx, ops) {
       if (funded) {
         if (account < a.buyin) return deny('Not enough money in your bank account (' + fmt(account) + ').');
         t.players.push(newPlayer(t.nextId++, name, a.buyin, actor.ref));
-        if (auto && t.settings.game !== 'roulette') { const np = t.players[t.players.length - 1]; np.out = true; np.fresh = true; }      // a new player sits out until they place a bet, so nobody is dealt in by surprise
+        if (auto && t.settings.game !== 'roulette' && t.settings.game !== 'poker') { const np = t.players[t.players.length - 1]; np.out = true; np.fresh = true; }      // a new player sits out until they place a bet, so nobody is dealt in by surprise
         t.funded += a.buyin;
         bankOp(actor.ref, -a.buyin, 'buyin', 'Bought in at a table');
         return { ok: true, vault: -a.buyin, vaultRef: actor.ref };
@@ -1056,7 +1130,7 @@ export default {
     // Create a table: find an unused code, claim it, return the host's secret token.
     if (!m[1]) {
       if (request.method !== 'POST') return json({ error: 'method not allowed' }, 405);
-      let game = 'blackjack'; try { const cb = JSON.parse((await request.text()) || '{}'); if (cb && cb.game === 'roulette') game = 'roulette'; } catch (e) { game = 'blackjack'; }
+      let game = 'blackjack'; try { const cb = JSON.parse((await request.text()) || '{}'); if (cb && (cb.game === 'roulette' || cb.game === 'poker')) game = cb.game; } catch (e) { game = 'blackjack'; }
       for (let i = 0; i < 8; i++) {
         const code = randomString(5, CODE_CHARS);
         const token = randomString(32, 'abcdefghijklmnopqrstuvwxyz0123456789');
@@ -1180,7 +1254,7 @@ export class Room {
       await this.state.storage.put('meta', { token, v: 0, updated: now, born: now });
       let ci = {}; try { ci = await (await reg(this.env, '/casino/get', {})).json(); } catch (e) { ci = {}; }
       const hostRef = REF_RE.test(request.headers.get('X-Ref') || '') ? request.headers.get('X-Ref') : '';
-      await this.state.storage.put('table', { players: [], history: [], hostRef, potStart: ci.pot || 0, epoch: ci.epoch || 0, maxBet: maxBetFor(ci.pot || 0) || DEFAULT_MAX_BET, settings: { auto: true, rounds: true, game: game === 'roulette' ? 'roulette' : 'blackjack' } });   // new tables are online dealer tables
+      await this.state.storage.put('table', { players: [], history: [], hostRef, potStart: ci.pot || 0, epoch: ci.epoch || 0, maxBet: maxBetFor(ci.pot || 0) || DEFAULT_MAX_BET, settings: { auto: true, rounds: true, game: game === 'roulette' || game === 'poker' ? game : 'blackjack' } });   // new tables are online dealer tables
       return json({ ok: true });
     }
 
@@ -1197,12 +1271,12 @@ export class Room {
       let accName = ''; try { accName = decodeURIComponent(request.headers.get('X-Name') || ''); } catch (e) { accName = ''; }
       const act = body && body.action;
       let account;                                     // bank account balance, only fetched when an action spends from it
-      if (act && ref && ['seat', 'rebuy', 'vault_withdraw', 'vault_deposit', 'bet', 'rbet', 'rrepeat', 'remove'].includes(act.type)) {      // an overdue loan freezes the account: no playing, no cashing out, repaying is still allowed
+      if (act && ref && ['seat', 'rebuy', 'vault_withdraw', 'vault_deposit', 'bet', 'rbet', 'rrepeat', 'vdeal', 'remove'].includes(act.type)) {      // an overdue loan freezes the account: no playing, no cashing out, repaying is still allowed
         let fz = false; try { fz = (await (await reg(this.env, '/vault/get', { ref })).json()).frozen === true; } catch (e) { fz = false; }
         if (fz) return json({ ok: false, error: 'Your account is frozen until your loan is repaid. Repay it on the Me tab.' }, 400);
       }
       if (act && ref && ['seat', 'rebuy', 'vault_withdraw'].includes(act.type)) account = (await (await reg(this.env, '/vault/get', { ref })).json()).balance;
-      let pot; if (act && (act.type === 'bet' || act.type === 'rbet' || act.type === 'rrepeat') && table.settings.auto) { try { pot = (await (await reg(this.env, '/casino/get', {})).json()).pot; } catch (e) { pot = undefined; } }
+      let pot; if (act && (act.type === 'bet' || act.type === 'rbet' || act.type === 'rrepeat' || act.type === 'vdeal') && table.settings.auto) { try { pot = (await (await reg(this.env, '/casino/get', {})).json()).pot; } catch (e) { pot = undefined; } }
       const res = applyAction(table, { role: isHost ? 'host' : 'player', ref }, act, { funded: true, account, secret, now, name: accName, pot });
       if (!res.ok) return json({ ok: false, error: res.error }, 400);
       let vaultBalance;
@@ -1525,7 +1599,7 @@ export class Registry {
       const code = String(b.code || '');
       if (!/^[A-Z0-9]{4,6}$/.test(code)) return json({ error: 'bad request' }, 400);
       const old = await s.get('tb:' + code);
-      await s.put('tb:' + code, { code, game: b.game === 'roulette' ? 'roulette' : 'blackjack', hostRef: REF_RE.test(String(b.hostRef || '')) ? b.hostRef : '', seats: Math.max(0, Math.min(99, b.seats | 0)), maxBet: Math.max(0, b.maxBet | 0), since: old ? old.since : Date.now(), seen: Date.now() });
+      await s.put('tb:' + code, { code, game: b.game === 'roulette' || b.game === 'poker' ? b.game : 'blackjack', hostRef: REF_RE.test(String(b.hostRef || '')) ? b.hostRef : '', seats: Math.max(0, Math.min(99, b.seats | 0)), maxBet: Math.max(0, b.maxBet | 0), since: old ? old.since : Date.now(), seen: Date.now() });
       return json({ ok: true });
     }
     if (path === '/lobby/close') { await s.delete('tb:' + String(b.code || '')); return json({ ok: true }); }
