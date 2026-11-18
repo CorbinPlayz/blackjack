@@ -243,3 +243,91 @@ Every sound also has a visual cue (a captions flash) so sound-off players miss n
 - All new effects register in one `FX` module with `enabled(level)` so Lite/Fancy/Off is one switch.
 - Testing: a Playwright run per surface (screenshots in Fancy and Lite), a frame-time check, a reduced-motion check, a check that the page still works with all effects forced off, and the money-invariant suites unchanged.
 - Order inside step 15: 15a felt + room, 15b dealing + chips + hand panel, 15c roulette wheel, 15d craps and poker, 15e collectibles, sounds, easter eggs, 15f performance and accessibility pass. Chrome and app-wide theming (section I and M) come with 15e.
+
+---
+# PART 3: build-level detail (2026-11-18, "Yes more detail")
+Part 1 and 2 say what it looks like. This part says exactly how, so step 15 has no guesswork. Still planning only.
+
+## R. Layout and geometry
+Design canvas: the table is one SVG/HTML stage with `viewBox 0 0 360 520` on phones (portrait), `0 0 960 540` on desktop. Everything is positioned in stage units and scaled with `transform: scale()` so the same art fits every screen.
+Z-order (bottom to top): 0 room background, 1 far figures, 2 table shadow, 3 rail, 4 felt, 5 printed markings, 6 bet circles, 7 chips on the felt, 8 cards, 9 seat plates, 10 effects (sparkles, confetti), 11 dealer bubble, 12 hand panel and controls, 13 toasts, 14 modals.
+Blackjack seats (desktop, stage 960x540): table is an ellipse centered (480,260), radii 400x170; the seat arc follows y = 260 + 170*sin(t), x = 480 + 400*cos(t) for t in [20deg, 160deg]; 6 seats at t = 30, 54, 78, 102, 126, 150 degrees (seat 1 left, seat 6 right). The dealer stands at (480, 70), shoe at (610, 90), discard tray at (350, 90), chip rack at (480, 130).
+Phones (stage 360x520): the dealer at the top (180,60), the shoe at (260, 70), discard at (100, 70). The other players sit in a row of small seats at y=190 (up to 5, 56px wide each); MY seat is large at the bottom (180, 360), 150px wide, with cards 48x68. The hand panel docks at the bottom-right (right 12px, bottom 72px above the tab bar, 168px wide) with the cards, total and four 44px buttons in a 2x2 grid. The left-handed setting mirrors the panel to the left.
+Bet circles: 44px radius 22 on desktop, 36px on phones, centered 54px in front of each seat. Cards for a seat are stacked with a 22px horizontal fan per card (desktop 26px), up to 8 cards, then they overlap further.
+Dealer cards: placed at (dealer x - 30 + 28*i, 112) so the hole card is the second, face down at first.
+Safe areas: all controls stay inside `env(safe-area-inset-*)`.
+
+## S. The roulette wheel, exactly
+Pockets (American, clockwise from the top, verify against `roulLabel` in the code before building): 0, 28, 9, 26, 30, 11, 7, 20, 32, 17, 5, 22, 34, 15, 3, 24, 36, 13, 1, 00, 27, 10, 25, 29, 12, 8, 19, 31, 18, 6, 21, 33, 16, 4, 23, 35, 14, 2 (38 pockets, 9.4737 degrees each).
+Rings (SVG circles, wheel viewBox 0 0 300 300, center 150,150): outer bowl r=146 (wood gradient), brass rim r=140 to r=134, ball track r=132 to r=112 (dark lacquer with a groove), deflector ring at r=112 (8 diamonds), pocket ring r=96 to r=66 (red/black/green wedges with 0.6px metal separators), number ring r=88 (text 9px, gold), inner cone r=60 to r=24, turret r=24 to r=8, cross handle 4 arms.
+Rotation: the inner group (pockets, cone, turret) rotates around the center at 0.07 turns per second (about 25 degrees per second) clockwise, never stopping. The ball is a separate group on the track rotating the other way.
+Ball timeline for a server result at pocket index k (target angle in the wheel's own frame = k * 9.4737 + 4.74):
+- t = 0 to 1.6s: ball at r=122 spins at 1.15 turns/s decelerating by easing `cubic-bezier(.25,.1,.25,1)`, counter to the wheel.
+- t = 1.6s to 3.4s: ball spirals inward from r=122 to r=104 while slowing to 0.35 turns/s; wobbles +-1.5px.
+- t = 3.4s to 4.3s: the drop: hits the deflector ring (random one of 8) and bounces 3 times: apparent radius changes r=104 -> 99 (bounce 1, 180ms) -> 102 -> 97 (120ms) -> 100 -> 96 (70ms); each bounce also nudges the angle by +-6, +-3, +-1 degrees.
+- t = 4.3s to 5.0s: the ball rolls through 1 to 2 adjacent pockets (a half turn of the settle) and drops into pocket k; it then rides with the wheel (the ball group's angle = the wheel's angle + the target) so it stays in its pocket.
+- Timing compensation: the poll delay is up to 1.5s and the server clock offset is known (`skew`); the animation starts at the server's spin time (`roul.nextAt - 8000`) minus the skew, so players who see the result late catch the spin partway; if more than 4s late the ball is just placed in the pocket.
+- Wheel direction flips each spin (alternating by `roul.n` parity).
+Light: a white elliptical highlight (opacity .35) fixed in the screen frame (not rotating) so reflections slide across the rotating lacquer.
+Dolly: a 14x14 brass block with a 2px highlight dropped from 60px above the winning number's board cell in 280ms with a small bounce, glow 8px; on the next window it lifts away.
+
+## T. State-diff event model (how the client animates a polled state)
+Keep `prev` and `cur` normalised states. A pure function `events(prev, cur)` returns an ordered list; the animation queue plays them without blocking input, and if the queue is longer than 6 seconds of work it fast-forwards (plays at 3x) so the screen never lags behind the truth.
+Events (blackjack): `seat-in(seat)`, `seat-out(seat)`, `bet(seat, amount)`, `deal-card(target, index, card|null, faceDown)` (dealing order recovered as seats left to right, dealer up card, seats again, dealer hole), `peek`, `flip-hole`, `hit(seat, handIdx)`, `stand`, `double`, `split`, `insurance`, `bust`, `blackjack`, `dealer-draw`, `settle(seat, net)`, `shuffle`, `cut-card`, `last-hand`.
+Rules: if `prev` is null (first snapshot after joining) emit nothing and just draw the final scene (no animation for what is already there); cards that appear in `cur` but not `prev` are "new"; the new cards' order is by (round deal order); a `deal-card` for a face-down dealer card never carries the value; ids come from `players[].id` and `hands[].idx`.
+Events (roulette): `window-open`, `bet-placed(seat,kind,sel,amount)`, `no-more-bets`, `spin(num)`, `land(num)`, `settle(seat,net)`, `clear-board`.
+Events (craps): `window-open`, `bet-placed`, `roll(d1,d2)`, `point-on(n)`, `point-off`, `settle`.
+Events (poker): `deal(hand)`, `hold-toggle` (local only), `draw(hand)`, `result(k,net)`.
+Idempotence: events are derived from state, so duplicates after reconnect cannot replay; `lastV` (state version) gates the diff.
+
+## U. What the server would need (small, optional, all cosmetic)
+- Blackjack public state could add `shoeLeft` (cards remaining, 0..312), `cutAt` (boolean, true when the cut card has been reached) and `shuffled` (a counter that increments on each reshuffle) so the shoe thickness, cut card and shuffle animation are real. These leak nothing the player cannot already infer.
+- Dealer persona: `settings.dealerName` chosen from the 4 on table creation (one field).
+- Emotes: an action `emote {e}` (e in a fixed list of 8) stored as `p.em = {e, at}` on the seat, expiring after 3 seconds, rate-limited to one per 3 seconds per seat; no money involved; included in the poll like any other seat field.
+- Roulette results phase 8s to 12s (one constant).
+- Nothing else; the invariant tests are not touched because none of these move money.
+- Client-only for: avatar colour (hash of the name), drink choice, cosmetics (stored in localStorage; a later step could save them to the account in the Registry with a tiny `/cosmetics` route).
+
+## V. The FX module (so it stays tidy)
+```
+FX = { level: 'fancy' | 'lite' | 'off', on(name), loop(name, fn), once(name, fn), pause(), resume() }
+```
+One `requestAnimationFrame` loop drives every registered loop with a delta time; each loop has a cost class (1 cheap, 3 heavy) and in Lite only cost 1 loops run. A frame-time monitor counts slow frames and flips Fancy to Lite after 20 slow frames in a row, with a small "Effects: Lite" toast (the player can flip it back).
+CSS tokens: `--felt-1 --felt-2 --rail --brass --brass-2 --neon-a --neon-b --lamp --card-back --chip-5 --chip-10 --chip-25 --chip-50 --chip-100 --chip-500 --chip-1000 --shadow-soft --shadow-hard --ease-out --ease-spring --t-fast --t-mid --t-big`. Themes only override tokens.
+Sprite sheet: all art is `<symbol>`s in one hidden `<svg>` (chip faces, card pips, face-card figures, dealer busts, slot cabinets, bottles, frames, silhouettes) referenced with `<use href="#id">`.
+Sound: one `AudioContext` created on the first user gesture, a master gain, a bus per category (sfx, ambient, music), `play(name, {vol, pitch})`. A tiny scheduler prevents more than 12 simultaneous voices.
+
+## W. Copy library (a starter set; more can be added anytime)
+Dealer lines (4 dealers, samples):
+- Dee (warm): "Place your bets, friends." / "Ooh, nice one." / "Dealer shows a six. Fingers crossed." / "Bust! It happens to the best of us." / "Come back soon, sweetheart." / "Shuffling, give me a sec."
+- Marco (dry): "Bets." / "Seventeen. Standing." / "Well. That was a choice." / "Blackjack. Congratulations, I suppose." / "Cards in the air." / "Table's open."
+- Priya (cheerful): "Let's play!" / "Look at that hand!" / "Whoa, bust, shake it off!" / "Twenty-one! Go you!" / "Fresh shoe, fresh luck!" / "Good game, see you next time!"
+- Lou (old-school): "Place 'em, kid." / "Dealer's got a face card showing." / "Easy come, easy go." / "Pays three to two. Always has." / "Back in my day, we counted to twenty-one on our fingers." / "Take care of yourself, kid."
+Stickman calls (full): 2 "Two, aces, snake eyes. Craps!" / 3 "Three, ace-deuce. Craps, three craps." / 4 "Four, little Joe." (hard: "Four the hard way") / 5 "Five, no field five." / 6 "Six, easy six." / 7 "Seven out! Line away." (on a point: "Seven out, pay the don'ts") / 8 "Eight, a square pair." (hard: "Eight the hard way") / 9 "Nine, Nina from Pasadena." / 10 "Ten, a pair of fives." / 11 "Yo-leven!" / 12 "Twelve, boxcars." Come-out natural: "Winner seven, pay the line." Point: "The point is six."
+Roulette croupier: "Place your bets." / "Last bets, please." / "No more bets." / "Seventeen, black." / "Twenty-three, red." / "Zero, green." / "Double zero, green." / "Winning bets paid."
+Loading lines (24): Shuffling six decks… / Counting the chips… / Dusting the felt… / Waking the dealer… / Polishing the roulette ball… / Checking the dice for loaded edges… (jokingly) / Warming up the lamp… / Sweeping the carpet… / Stacking the rack… / Calling the pit boss… / Pouring a club soda… / Tuning the slot machines… / Straightening the bow tie… / Oiling the wheel… / Lighting the neon… / Sharpening the pencils at the cage… / Finding your seat… / Locking the doors for the vault… / Cutting the deck… / Folding the napkins… / Pressing the felt… / Counting backwards from 21… / Whistling past the pit… / Almost there…
+Errors: "The pit boss says no: that bet is too big." / "The cage is closed for a moment. Try again." / "Lost the connection. The dealer is holding your seat." / "That seat is taken." / "You need more chips for that." / "The table closed. It was a good run." / "Slow down, the dice are still rolling." / "The floor is full. Try another table."
+Fortune cookie (daily bonus, 20): "A pair of eights is nothing to split about." / "Fortune favors the patient dealer." / "Hit when the dealer shows a seven." / "Luck is just preparation meeting a good shuffle." / "The ball always lands somewhere." / "Your next hand is the one you are waiting for." / "Stand tall at seventeen." / "A small bet today buys a big laugh tomorrow." / "Never trust a streak, always enjoy one." / "Double down on kindness." / "The house has a bad memory for good luck." / "Count your blessings, not your chips." / "A lucky seven is nearby." / "The dealer smiles at those who greet her." / "Take the long way to the cashier." / "Odds are, you will be fine." / "Press your luck gently." / "The river runs to whoever sits down." / "Every shuffle is a fresh start." / "You will find a $5 chip in an unexpected place."
+Achievements (name: how): First Hand (play a hand), Natural (first blackjack), Charlie (five-card 21), Double Trouble (win a double), Splitsville (win both split hands), Ace in the Hole (win with a hole-card ace blackjack), Spin Doctor (win a straight-up number), Red Hot (3 reds in a row), Point Maker (make a point in craps), Pass Master (5 pass wins in a row), Royal Treatment (royal flush), Debt Free (repay a loan), Lender (lend a friend money), Regular (25 hands), High Roller (bet over $100), Survivor (play through a lockdown), Night Owl (play after 3am local), Early Bird (play before 7am), Comeback (win after being under $50), Friendly Table (play with 3 friends).
+Plaques and signs: "Est. 2026", "No windows. No clocks.", "The house always smiles", "Please tip your dealer with kindness", "Reserved for the high roller", "Table CODE", "Maximum bet: $X".
+
+## X. Test plan for step 15 (what the Playwright runs assert)
+- Blackjack felt: 6 seat anchors are inside the stage; my seat is larger than others; empty seats show "Sit here"; the hand panel is fixed at the bottom-right and does not overlap the tab bar; left-handed puts it left.
+- Dealing: with a scripted state sequence the card events arrive in the real deal order; the hole card shows a back until the flip; a join mid-hand animates nothing; the queue fast-forwards when behind; no card face appears for a hidden dealer card (check the DOM text).
+- Chips: the rendered stack's total equals the balance (colour-up maths) for 20 random balances; payout and sweep animations end with the same chips on screen as the state says.
+- Roulette: the ball's final angle equals pocket k for all 38 pockets (call the pure angle function 38 times); the 38 pocket labels match the order list; the results text appears only after `land`; a late joiner 4s into the spin sees the ball placed.
+- Craps: dice pips match d1 and d2 for all 36 combinations; the puck is OFF on the come-out and ON on the point number.
+- Poker: the HELD tags match the holds; the pay-table row highlight matches the result.
+- Lite/Fancy: Lite removes all loops (no running CSS animation names other than allowed ones); the frame-time monitor flips to Lite under a throttled CPU; reduced-motion shows no animations.
+- Accessibility: 4-colour deck changes suit colours; every tap target is at least 44px; contrast of text on felt is at least 4.5:1.
+- Money: all existing suites (blackjack, roulette, poker, craps, bank, loans, lobby) still pass unchanged; the new emote/`shoeLeft` fields do not touch balances.
+- Performance: a 60-second run of an active blackjack table keeps the median frame under 12ms in Fancy on the test machine.
+
+## Y. Risks and how to avoid them
+- Too heavy on old phones: the Lite switch, cost classes, and lazy building.
+- Animation falling behind the server: the queue fast-forward and "the state is always the truth" rule (the final scene is drawn from state, animations only decorate the transition).
+- Spoilers: roulette and dice results must not show in text before the animation lands (the text waits for `land`); the history strip also waits.
+- Motion sickness / photosensitivity: no flashing faster than 3Hz, no full-screen strobes, reduced-motion respected.
+- Visual clutter hiding the controls: effects stay behind z-index 12 (controls), and the hand panel never moves.
+- Bundle size: shared `<symbol>` sprites, no raster images, no fonts.
+- Scope creep: each sub-step (15a to 15f) ships independently and the user can stop after any of them.
