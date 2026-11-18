@@ -104,6 +104,15 @@
   .outcomes.two button { min-height: 46px; font-size: 14px; }
   .badge { display: inline-block; margin-left: 8px; padding: 2px 8px; border-radius: 999px; background: var(--green); color: #04130a; font-size: 11px; font-weight: 800; letter-spacing: .6px; vertical-align: middle; }
   .player.mine { border-color: var(--green); }
+  .cr-dice { display:flex; gap:10px; align-items:center; margin:8px 0; }
+  .cr-die { width:56px; height:56px; background:#f7f7f2; color:#111; border-radius:12px; display:flex; align-items:center; justify-content:center; font-size:44px; line-height:1; }
+  .cr-puck { padding:6px 12px; border-radius:20px; font-weight:800; font-size:14px; background:#222; color:#fff; border:2px solid #fff6; }
+  .cr-puck.on { background:#fff; color:#111; }
+  .cr-grid { display:grid; grid-template-columns:1fr 1fr; gap:8px; margin:10px 0; }
+  .cr-grid button { position:relative; min-height:56px; text-align:left; padding:8px 10px; line-height:1.2; }
+  .cr-grid button small { display:block; opacity:.75; font-weight:400; font-size:12px; }
+  .cr-grid button .cb { position:absolute; right:6px; top:6px; background:#ffd000; color:#111; border-radius:10px; padding:1px 7px; font-size:12px; font-weight:800; }
+  .cr-grid button.off { opacity:.4; }
   .vp-hand { display:flex; gap:6px; margin:12px 0 6px; }
   .vp-hand button { flex:1; min-width:0; background:none; border:2px solid transparent; border-radius:12px; padding:2px; position:relative; cursor:pointer; color:inherit; font:inherit; }
   .vp-hand button.held { border-color:#f5c542; }
@@ -418,6 +427,7 @@
       <button type="button" class="btn-ghost" id="hostBtn" style="width:100%">Start a blackjack table</button>
       <button type="button" class="btn-ghost" id="hostRouletteBtn" style="width:100%;margin-top:8px">Start a roulette table</button>
       <button type="button" class="btn-ghost" id="hostPokerBtn" style="width:100%;margin-top:8px">Start a video poker table</button>
+      <button type="button" class="btn-ghost" id="hostCrapsBtn" style="width:100%;margin-top:8px">Start a craps table</button>
     </div>
   </div>
   <div id="onlineOn" hidden>
@@ -1437,6 +1447,8 @@ var Core = (function () {
       q.trivia = ni(p.trivia); q.triviaAt = Number.isInteger(p.triviaAt) ? p.triviaAt : -1; q.vin = ni(p.vin); q.vout = ni(p.vout);
       q.rb = Array.isArray(p.rb) ? p.rb.filter(function (b) { return b && typeof b.k === 'string' && Array.isArray(b.sel) && Number.isInteger(b.a) && b.a > 0; }).map(function (b) { return { k: b.k, sel: b.sel.slice(0, 2), a: b.a }; }) : [];
       q.rrep = Array.isArray(p.rrep) ? p.rrep.length : 0;
+      q.cb = Array.isArray(p.cb) ? p.cb.filter(function (b) { return b && typeof b.k === 'string' && Number.isInteger(b.a) && b.a > 0; }).map(function (b) { return { k: b.k, a: b.a }; }) : [];
+      q.cl = p.cl && typeof p.cl === 'object' ? { net: Number.isInteger(p.cl.net) ? p.cl.net : 0, stake: ni(p.cl.stake), void: p.cl.void === true, items: Array.isArray(p.cl.items) ? p.cl.items.filter(function (i) { return i && typeof i.k === 'string' && Number.isInteger(i.net); }).map(function (i) { return { k: i.k, net: i.net }; }) : [] } : null;
       q.vp = p.vp && typeof p.vp === 'object' ? { phase: p.vp.phase === 'hold' ? 'hold' : 'idle', hand: Array.isArray(p.vp.hand) ? p.vp.hand.filter(function (c) { return Number.isInteger(c) && c >= 0 && c < 52; }).slice(0, 5) : [], bet: ni(p.vp.bet), res: p.vp.res && typeof p.vp.res === 'object' ? { k: String(p.vp.res.k || 'none'), net: Number.isInteger(p.vp.res.net) ? p.vp.res.net : 0, pay: ni(p.vp.res.pay) } : null } : null;
       q.rl = p.rl && typeof p.rl === 'object' ? { net: Number.isInteger(p.rl.net) ? p.rl.net : 0, stake: ni(p.rl.stake), pay: ni(p.rl.pay), void: p.rl.void === true } : null;
       q.ins = ni(p.ins); q.insDone = p.insDone === true; q.until = ni(p.until);          // online dealer: this seat's cards
@@ -1451,13 +1463,16 @@ var Core = (function () {
     out.settings = { locked: st.locked === true, maxBuyin: Number.isInteger(st.maxBuyin) && st.maxBuyin > 0 ? st.maxBuyin : 0,
       bankFee: Number.isInteger(st.bankFee) && st.bankFee >= 0 && st.bankFee <= 50 ? st.bankFee : 10,
       bankLimit: Number.isInteger(st.bankLimit) && st.bankLimit >= 0 && st.bankLimit <= 20 ? st.bankLimit : 3,
-      triviaPct: Number.isInteger(st.triviaPct) && st.triviaPct >= 0 && st.triviaPct <= 20 ? st.triviaPct : 10, rounds: st.rounds === true, autoBet: st.autoBet !== false, auto: st.auto === true, game: st.game === 'roulette' || st.game === 'poker' ? st.game : 'blackjack' };
+      triviaPct: Number.isInteger(st.triviaPct) && st.triviaPct >= 0 && st.triviaPct <= 20 ? st.triviaPct : 10, rounds: st.rounds === true, autoBet: st.autoBet !== false, auto: st.auto === true, game: st.game === 'roulette' || st.game === 'poker' || st.game === 'craps' ? st.game : 'blackjack' };
     var dl = s.deal && typeof s.deal === 'object' ? s.deal : null;
     out.deal = dl ? { phase: typeof dl.phase === 'string' ? dl.phase : 'betting', startedAt: Number.isInteger(dl.startedAt) ? dl.startedAt : 0, deadline: Number.isInteger(dl.deadline) ? dl.deadline : 0, dealAt: Number.isInteger(dl.dealAt) ? dl.dealAt : 0,
       cards: Array.isArray(dl.cards) ? dl.cards.filter(function (c) { return Number.isInteger(c) && c >= 0 && c < 52; }) : [], hole: dl.hole === true, dealerBJ: dl.dealerBJ === true } : null;
     var rl0 = s.roul && typeof s.roul === 'object' ? s.roul : {};
     out.roul = { phase: rl0.phase === 'results' ? 'results' : 'betting', closeAt: Number.isInteger(rl0.closeAt) ? rl0.closeAt : 0, nextAt: Number.isInteger(rl0.nextAt) ? rl0.nextAt : 0, n: Number.isInteger(rl0.n) && rl0.n > 0 ? rl0.n : 1,
       num: Number.isInteger(rl0.num) ? rl0.num : -1, hist: Array.isArray(rl0.hist) ? rl0.hist.filter(Number.isInteger).slice(0, 20) : [] };
+    var cr0 = s.craps && typeof s.craps === 'object' ? s.craps : {};
+    out.craps = { phase: cr0.phase === 'point' ? 'point' : 'come', point: Number.isInteger(cr0.point) ? cr0.point : 0, stage: cr0.stage === 'results' ? 'results' : 'betting', closeAt: Number.isInteger(cr0.closeAt) ? cr0.closeAt : 0, nextAt: Number.isInteger(cr0.nextAt) ? cr0.nextAt : 0, n: Number.isInteger(cr0.n) && cr0.n > 0 ? cr0.n : 1,
+      dice: Array.isArray(cr0.dice) && cr0.dice.length === 2 ? cr0.dice.filter(Number.isInteger).slice(0, 2) : [], hist: Array.isArray(cr0.hist) ? cr0.hist.filter(Number.isInteger).slice(0, 20) : [] };
     out.maxBet = Number.isInteger(s.maxBet) && s.maxBet >= 0 ? s.maxBet : 0;   // online dealer: the biggest wager the casino accepts (2% of its pot)
     var rd = s.round && typeof s.round === 'object' ? s.round : {};
     out.round = { n: Number.isInteger(rd.n) && rd.n > 0 ? rd.n : 1, phase: rd.phase === 'playing' ? 'playing' : 'betting' };
@@ -1614,6 +1629,7 @@ var Core = (function () {
   var bankLedger = [], vaultBal = null, triviaDeck = [], triviaBank = null;
   function roundsOn() { return !!online.role && !!Core.state.settings.rounds; }
   function isAuto() { return roundsOn() && !!Core.state.settings.auto; }
+  function isCraps() { return isAuto() && Core.state.settings.game === 'craps'; }
   function isPoker() { return isAuto() && Core.state.settings.game === 'poker'; }
   function isRoulette() { return isAuto() && Core.state.settings.game === 'roulette'; }
   var skew = 0;                                                         // server clock minus this device's clock, so countdowns agree
@@ -2253,8 +2269,8 @@ var Core = (function () {
 
       var rmode = roundsOn(), auto = isAuto();
       var inplay = rmode && p.hand > 0;
-      if (isPoker()) {
-        /* video poker is played in the panel above; nothing to bet on the seat card */
+      if (isPoker() || isCraps()) {
+        /* video poker and craps is played in the panel above; nothing to bet on the seat card */
       } else if (isRoulette()) {
         if (mine && p.rb && p.rb.length) card.appendChild(el('div', 'inplay', 'On the table: ' + Core.fmt(p.rb.reduce(function (n, b) { return n + b.a; }, 0))));
       } else if (ctl && rmode && isDealerSeat(p)) {
@@ -2451,6 +2467,8 @@ var Core = (function () {
       case 'remove': body = { type: 'remove', pid: a.pid }; break;
       case 'rbet': body = { type: 'rbet', k: a.k, sel: a.sel, a: a.a }; break;
       case 'rop': body = { type: a.op }; break;
+      case 'cbet': body = { type: 'cbet', k: a.k, a: a.a }; break;
+      case 'cop': body = { type: a.op }; break;
       case 'vdeal': body = { type: 'vdeal', a: a.a }; break;
       case 'vdraw': body = { type: 'vdraw', holds: a.holds }; break;
       case 'undo': body = { type: 'undo' }; break;
@@ -2505,7 +2523,7 @@ var Core = (function () {
   function cVal(c) { var r = c % 13; return r === 0 ? 11 : r >= 9 ? 10 : r + 1; }
   function handTot(cards) { var t = 0, a = 0; cards.forEach(function (c) { var v = cVal(c); t += v; if (v === 11) a++; }); while (t > 21 && a) { t -= 10; a--; } return { total: t, soft: a > 0 }; }
   function secsLeft(ts) { return Math.max(0, Math.ceil((ts - (Date.now() + skew)) / 1000)); }
-  function tickTimer() { var rc = $('rouCd'); if (rc) rc.textContent = 'Bets close in ' + secsLeft(parseInt(rc.getAttribute('data-until') || '0', 10)) + 's'; var cd = $('dealCd'); if (cd) cd.textContent = 'Dealing in ' + secsLeft(parseInt(cd.getAttribute('data-until') || '0', 10)) + '…'; var e = $('dealTimer'); if (!e) return; var u = parseInt(e.getAttribute('data-until') || '0', 10); e.textContent = u ? secsLeft(u) + 's' : ''; }
+  function tickTimer() { var cc = $('crCd'); if (cc) cc.textContent = 'Bets close in ' + secsLeft(parseInt(cc.getAttribute('data-until') || '0', 10)) + 's'; var rc = $('rouCd'); if (rc) rc.textContent = 'Bets close in ' + secsLeft(parseInt(rc.getAttribute('data-until') || '0', 10)) + 's'; var cd = $('dealCd'); if (cd) cd.textContent = 'Dealing in ' + secsLeft(parseInt(cd.getAttribute('data-until') || '0', 10)) + '…'; var e = $('dealTimer'); if (!e) return; var u = parseInt(e.getAttribute('data-until') || '0', 10); e.textContent = u ? secsLeft(u) + 's' : ''; }
   setInterval(tickTimer, 500);
   var casinoPot = null;
   function loadPot() { if (!isAuto()) return; api('/api/casino').then(function (r) { return r.ok ? r.json() : null; }).then(function (j) { if (j && typeof j.pot === 'number') casinoPot = j.pot; }).catch(function () {}); }
@@ -2634,6 +2652,7 @@ var Core = (function () {
 
   function renderRound() {
     var box = $('roundPanel');
+    if (isCraps()) { renderCraps(box); return; }
     if (isPoker()) { renderPoker(box); return; }
     if (isRoulette()) { renderRoulette(box); return; }
     if (isAuto()) { renderDealer(box); return; }
@@ -2854,6 +2873,69 @@ var Core = (function () {
     perform({ type: 'rop', op: op }).then(function (res) { rouMsg = res.ok ? '' : res.error; }).then(function () { busy = false; render(); });
   }
 
+
+  /* ---------- craps ---------- */
+  var CR_BETS = [['pass', 'Pass Line', 'Wins on 7 or 11, loses on 2, 3, 12. Pays 1 to 1.', 'come'], ['dp', "Don't Pass", 'Wins on 2 or 3, loses on 7 or 11. Pays 1 to 1.', 'come'],
+    ['odds_pass', 'Pass odds', 'Extra bet behind your Pass. Pays true odds.', 'point'], ['odds_dp', "Don't odds", "Extra bet behind your Don't Pass.", 'point'],
+    ['field', 'Field', '3, 4, 9, 10, 11 pay 1 to 1. 2 pays 2 to 1, 12 pays 3 to 1.', 'any'], ['any7', 'Any 7', 'One roll. Pays 4 to 1.', 'any'], ['anycraps', 'Any craps', 'One roll: 2, 3 or 12. Pays 7 to 1.', 'any']];
+  var CR_NAME = {}; CR_BETS.forEach(function (b) { CR_NAME[b[0]] = b[1]; });
+  var DIE = ['', '⚀', '⚁', '⚂', '⚃', '⚄', '⚅'];
+  var crChip = 500, crMsg = '', CR_CHIPS = [500, 1000, 2500, 5000, 10000];
+  function crGo(action) {
+    if (busy) return; busy = true;
+    perform(action).then(function (res) { crMsg = res.ok ? '' : res.error; if (res.ok) fxSafe(function () { sfxSafe('chip'); }); }).then(function () { busy = false; render(); });
+  }
+  function renderCraps(box) {
+    var t = Core.state, R = t.craps, me = mySeat(), betting = R.stage === 'betting';
+    box.hidden = false; box.innerHTML = '';
+    var bar = el('div', 'rbar'), left = el('div');
+    var ttl = el('div', 'big', 'Craps · roll ' + R.n); ttl.style.cssText = 'font-size:20px;font-weight:800'; left.appendChild(ttl);
+    if (!t.players.length) left.appendChild(el('div', 'sub2', 'Take a seat to start. The dice roll every 20 seconds once someone has bet.'));
+    else if (betting && R.closeAt) { var cd = el('div', 'sub2'); cd.id = 'crCd'; cd.setAttribute('data-until', String(R.closeAt)); cd.textContent = 'Bets close in ' + secsLeft(R.closeAt) + 's'; left.appendChild(cd); }
+    else if (!betting) left.appendChild(el('div', 'sub2', 'No more bets. The next round opens in a moment.'));
+    bar.appendChild(left);
+    var pk = el('div', 'cr-puck' + (R.phase === 'point' ? ' on' : ''), R.phase === 'point' ? 'POINT ' + R.point : 'COME OUT'); pk.id = 'crPuck'; bar.appendChild(pk);
+    box.appendChild(bar);
+    if (R.dice.length === 2) {
+      var dc = el('div', 'cr-dice'); dc.id = 'crDice';
+      dc.appendChild(el('div', 'cr-die', DIE[R.dice[0]])); dc.appendChild(el('div', 'cr-die', DIE[R.dice[1]])); dc.appendChild(el('div', 'big', String(R.dice[0] + R.dice[1])));
+      box.appendChild(dc);
+    }
+    if (R.hist.length) { var hs = el('div', 'rou-hist'); R.hist.forEach(function (n) { hs.appendChild(el('span', 'rn ' + (n === 7 ? 'red' : 'black'), String(n))); }); box.appendChild(hs); }
+    if (me && me.cl && !betting) {
+      var parts = me.cl.items.map(function (i) { return CR_NAME[i.k] + ' ' + (i.net > 0 ? '+' : i.net < 0 ? '−' : '') + (i.net === 0 ? 'push' : Core.fmt(Math.abs(i.net))); }).join(' · ');
+      var rr = el('div', 'rou-result'); rr.id = 'crRes'; rr.textContent = me.cl.void ? 'Your bets were void (the chips were gone).' : (me.cl.net > 0 ? 'You won ' + Core.fmt(me.cl.net) : me.cl.net < 0 ? 'You lost ' + Core.fmt(-me.cl.net) : 'Even') + (parts ? ' · ' + parts : '');
+      box.appendChild(rr);
+    }
+    if (!me) { box.appendChild(el('div', 'sub2', 'Pass Line wins when the shooter makes the point. Take a seat and tap a bet to start.')); return; }
+    var chips = el('div', 'rou-chips');
+    CR_CHIPS.forEach(function (c) { var b = el('button', c === crChip ? 'sel' : '', Core.fmt(c).replace(/\.00$/, '')); b.type = 'button'; b.setAttribute('data-crchip', String(c)); chips.appendChild(b); });
+    box.appendChild(chips);
+    var on = {}; me.cb.forEach(function (b) { on[b.k] = (on[b.k] || 0) + b.a; });
+    var grid = el('div', 'cr-grid');
+    CR_BETS.forEach(function (x) {
+      var allowed = betting && (x[3] === 'any' || x[3] === R.phase);
+      var b = el('button', 'btn-ghost' + (allowed ? '' : ' off'), x[1]); b.type = 'button'; b.setAttribute('data-crbet', x[0]); if (!allowed) b.disabled = true;
+      b.appendChild(el('small', null, x[2]));
+      if (on[x[0]]) b.appendChild(el('span', 'cb', Core.fmt(on[x[0]]).replace(/\.00$/, '')));
+      grid.appendChild(b);
+    });
+    box.appendChild(grid);
+    var tot = me.cb.reduce(function (n2, b) { return n2 + b.a; }, 0);
+    box.appendChild(el('div', 'sub2', (tot ? 'On the table: ' + Core.fmt(tot) + ' of ' + Core.fmt(me.balance) + ' chips. ' : 'Tap a chip, then tap a bet. ') + 'Up to 25% of your chips, $5 minimum per bet. Pass and Don\'t Pass stay until the point or a 7.'));
+    var ctl = el('div', 'rou-ctl');
+    [['cundo', 'Undo'], ['cclear', 'Clear']].forEach(function (x) { var b = el('button', 'btn-ghost', x[1]); b.type = 'button'; b.setAttribute('data-crop', x[0]); if (!betting || !me.cb.length) b.disabled = true; ctl.appendChild(b); });
+    box.appendChild(ctl);
+    var m = el('div', 'msg'); m.id = 'crMsg'; m.textContent = crMsg; box.appendChild(m);
+  }
+  document.addEventListener('click', function (e) {
+    var t = e.target; while (t && t !== document && !(t.getAttribute && (t.getAttribute('data-crchip') || t.getAttribute('data-crbet') || t.getAttribute('data-crop')))) t = t.parentNode;
+    if (!t || t === document || !$('roundPanel').contains(t)) return;
+    e.preventDefault();
+    if (t.getAttribute('data-crchip')) { crChip = parseInt(t.getAttribute('data-crchip'), 10); render(); return; }
+    if (t.getAttribute('data-crbet')) { crGo({ type: 'cbet', k: t.getAttribute('data-crbet'), a: crChip }); return; }
+    if (t.getAttribute('data-crop')) crGo({ type: 'cop', op: t.getAttribute('data-crop') });
+  });
   /* ---------- video poker (Jacks or Better) ---------- */
   var VP_TABLE = [['royal', 'Royal flush', 100], ['sflush', 'Straight flush', 50], ['quads', 'Four of a kind', 25], ['full', 'Full house', 9], ['flush', 'Flush', 6], ['straight', 'Straight', 4], ['trips', 'Three of a kind', 3], ['twopair', 'Two pair', 2], ['jacks', 'Jacks or better', 1]];
   var VP_NAMES = {}; VP_TABLE.forEach(function (r) { VP_NAMES[r[0]] = r[1]; });
@@ -2982,7 +3064,7 @@ var Core = (function () {
       var box = $('lobbyRows'); box.innerHTML = ''; $('lobbyEmpty').hidden = d.tables.length > 0;
       d.tables.forEach(function (t) {
         var row = el('div', 'lobby-row'), lt = el('div', 'lt');
-        lt.appendChild(el('b', null, (t.game === 'roulette' ? '🎡 Roulette' : t.game === 'poker' ? '🃏 Video poker' : '♠ Blackjack') + ' · ' + t.code));
+        lt.appendChild(el('b', null, (t.game === 'roulette' ? '🎡 Roulette' : t.game === 'poker' ? '🃏 Video poker' : t.game === 'craps' ? '🎲 Craps' : '♠ Blackjack') + ' · ' + t.code));
         lt.appendChild(el('span', null, (t.host ? t.host + "'s table · " : '') + (t.seats === 1 ? '1 player' : t.seats + ' players') + (t.maxBet ? ' · max bet ' + Core.fmt(t.maxBet) : '')));
         var b = el('button', 'btn-add', 'Sit down'); b.type = 'button'; b.setAttribute('data-lobby', t.code); b.style.marginTop = '0';
         row.appendChild(lt); row.appendChild(b); box.appendChild(row);
@@ -3390,7 +3472,7 @@ var Core = (function () {
     if (needUrl()) return;
     setOnlineMsg('Creating table…', true);
     try {
-      var r = await api('/api/rooms', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ game: game === 'roulette' || game === 'poker' ? game : 'blackjack' }) });
+      var r = await api('/api/rooms', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ game: game === 'roulette' || game === 'poker' || game === 'craps' ? game : 'blackjack' }) });
       if (r.status === 403) { accessLost(); return; }
       if (!r.ok) throw new Error('status ' + r.status);
       var d = await r.json();
@@ -3431,6 +3513,7 @@ var Core = (function () {
 
   $('hostBtn').addEventListener('click', function (e) { e.preventDefault(); hostTable('blackjack'); });
   $('hostRouletteBtn').addEventListener('click', function (e) { e.preventDefault(); hostTable('roulette'); });
+  $('hostCrapsBtn').addEventListener('click', function (e) { e.preventDefault(); hostTable('craps'); });
   $('hostPokerBtn').addEventListener('click', function (e) { e.preventDefault(); hostTable('poker'); });
   $('joinBtn').addEventListener('click', function (e) { e.preventDefault(); joinTable(); });
   $('joinCode').addEventListener('keydown', function (e) { if (e.key === 'Enter') { e.preventDefault(); joinTable(); } });

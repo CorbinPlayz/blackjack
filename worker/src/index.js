@@ -164,6 +164,85 @@ function rouletteAdvance(t, now, rand) {
   return true;
 }
 
+const GAMES = ['blackjack', 'roulette', 'poker', 'craps'];
+// ================= CRAPS =================
+// A craps table is an online table with settings.game = 'craps'. The table rolls the dice itself (no shooter): a 20-second betting window, the roll, 6 seconds of results.
+// Bets: pass / don't pass (come-out only, locked once a point is set), odds behind them (point only, true odds, up to 3x), field, any 7, any craps.
+// Bets stay on a player's own chips until they resolve (one-roll bets every roll; pass/don't pass when the point or a 7 shows).
+const CR_WINDOW_MS = 20000, CR_RESULT_MS = 6000, CR_MAX_ODDS = 3, CR_HIST = 20;
+const CR_KINDS = ['pass', 'dp', 'odds_pass', 'odds_dp', 'field', 'any7', 'anycraps'];
+const CR_POINTS = [4, 5, 6, 8, 9, 10];
+const CR_TRUE = { 4: [2, 1], 10: [2, 1], 5: [3, 2], 9: [3, 2], 6: [6, 5], 8: [6, 5] };       // odds pay num:den on the point; laying odds pays the reverse
+export function crapsRoll(bets, phase, point, total) {
+  const items = []; let np = phase === 'come' ? 0 : point, nphase = phase;
+  const isPoint = CR_POINTS.includes(total);
+  for (const b of bets) {
+    let net = 0, done = true;
+    if (b.k === 'pass') {
+      if (phase === 'come') { if (total === 7 || total === 11) net = b.a; else if (total === 2 || total === 3 || total === 12) net = -b.a; else done = false; }
+      else if (total === point) net = b.a; else if (total === 7) net = -b.a; else done = false;
+    } else if (b.k === 'dp') {
+      if (phase === 'come') { if (total === 2 || total === 3) net = b.a; else if (total === 7 || total === 11) net = -b.a; else if (total === 12) net = 0; else done = false; }
+      else if (total === 7) net = b.a; else if (total === point) net = -b.a; else done = false;
+    } else if (b.k === 'odds_pass') {
+      if (phase !== 'point') { done = false; } else if (total === point) net = Math.floor(b.a * CR_TRUE[point][0] / CR_TRUE[point][1]); else if (total === 7) net = -b.a; else done = false;
+    } else if (b.k === 'odds_dp') {
+      if (phase !== 'point') { done = false; } else if (total === 7) net = Math.floor(b.a * CR_TRUE[point][1] / CR_TRUE[point][0]); else if (total === point) net = -b.a; else done = false;
+    } else if (b.k === 'field') {
+      net = total === 2 ? 2 * b.a : total === 12 ? 3 * b.a : [3, 4, 9, 10, 11].includes(total) ? b.a : -b.a;
+    } else if (b.k === 'any7') net = total === 7 ? 4 * b.a : -b.a;
+    else if (b.k === 'anycraps') net = total === 2 || total === 3 || total === 12 ? 7 * b.a : -b.a;
+    items.push({ k: b.k, a: b.a, net, done });
+  }
+  if (phase === 'come') { if (isPoint) { nphase = 'point'; np = total; } }
+  else if (total === point || total === 7) { nphase = 'come'; np = 0; }
+  return { items, phase: nphase, point: np };
+}
+const crStake = bets => bets.reduce((n, b) => n + b.a, 0);
+// The most a set of bets can win (net) on one roll, over every total the dice can show.
+export function crapsMaxWin(bets, phase, point) {
+  let m = 0; for (let d = 2; d <= 12; d++) { const r = crapsRoll(bets, phase, point, d); m = Math.max(m, r.items.reduce((n, i) => n + (i.done && i.net > 0 ? i.net : 0), 0)); } return m;
+}
+export function crapsNormBets(x) {
+  return (Array.isArray(x) ? x : []).slice(0, 12).filter(b => b && CR_KINDS.includes(b.k) && Number.isInteger(b.a) && b.a > 0).map(b => ({ k: b.k, a: b.a }));
+}
+export function crapsNormTable(r) {
+  r = r && typeof r === 'object' ? r : {};
+  const dice = Array.isArray(r.dice) && r.dice.length === 2 && r.dice.every(d => Number.isInteger(d) && d >= 1 && d <= 6) ? r.dice.slice() : [];
+  const phase = r.phase === 'point' && CR_POINTS.includes(r.point) ? 'point' : 'come';
+  return { phase, point: phase === 'point' ? r.point : 0, stage: r.stage === 'results' ? 'results' : 'betting', closeAt: nn(r.closeAt), nextAt: nn(r.nextAt), n: Math.max(1, nn(r.n)), dice,
+    hist: (Array.isArray(r.hist) ? r.hist : []).filter(x => Number.isInteger(x) && x >= 2 && x <= 12).slice(0, CR_HIST) };
+}
+function crapsAdvance(t, now, rand) {
+  const R = t.craps; let ch = false;
+  if (!t.players.length) { if (R.closeAt || R.stage !== 'betting' || R.phase !== 'come') { R.stage = 'betting'; R.phase = 'come'; R.point = 0; R.closeAt = 0; R.nextAt = 0; ch = true; } return ch; }
+  if (R.stage === 'results') {
+    if (now < R.nextAt) return false;
+    R.stage = 'betting'; R.closeAt = now + CR_WINDOW_MS; R.nextAt = 0; t.players.forEach(p => { p.cl = null; }); return true;
+  }
+  if (!R.closeAt) { R.closeAt = now + CR_WINDOW_MS; ch = true; }
+  if (now < R.closeAt) return ch;
+  const bettors = t.players.filter(p => p.cb.length);
+  if (!bettors.length) { R.closeAt = now + CR_WINDOW_MS; return true; }
+  const rr = rand || randInt, d1 = rr(6) + 1, d2 = rr(6) + 1, total = d1 + d2;
+  let next = null;
+  bettors.forEach(p => {
+    const r = crapsRoll(p.cb, R.phase, R.point, total); next = r;
+    const done = r.items.filter(i => i.done), stake = crStake(done);
+    if (stake > p.balance) { p.cl = { net: 0, stake, void: true, items: [] }; p.cb = p.cb.filter((b, i) => !r.items[i].done); return; }       // the chips are no longer there: the bets that were settling are void
+    const net = done.reduce((n, i) => n + i.net, 0);
+    p.balance += net; t.house -= net;
+    p.cb = p.cb.filter((b, i) => !r.items[i].done);
+    p.cl = { net, stake, void: false, items: done.map(i => ({ k: i.k, net: i.net })) };
+    histPush(t, p, net > 0 ? 'win' : net < 0 ? 'lose' : 'push', stake, net);
+  });
+  const fin = crapsRoll([], R.phase, R.point, total);
+  R.phase = fin.phase; R.point = fin.point;
+  R.dice = [d1, d2]; R.n += 1; R.hist.unshift(total); R.hist = R.hist.slice(0, CR_HIST);
+  R.stage = 'results'; R.nextAt = now + CR_RESULT_MS; R.closeAt = 0;
+  return true;
+}
+
 // ================= VIDEO POKER (Jacks or Better) =================
 // A poker table is an online table with settings.game = 'poker'. Every player plays alone against the casino pot at their own pace.
 // vdeal takes the stake (into the table house) and deals 5 cards; vdraw replaces the cards you did not hold and pays the hand out of the house.
@@ -207,6 +286,7 @@ export function advance(t, secret, now, rand) {
   if (!t.settings.auto) return false;
   if (t.settings.game === 'roulette') return rouletteAdvance(t, now, rand);
   if (t.settings.game === 'poker') return false;
+  if (t.settings.game === 'craps') return crapsAdvance(t, now, rand);
   const D = t.deal;
   let changed = false;
   const draw = () => { if (!secret.shoe.length) secret.shoe = newShoe(rand); return secret.shoe.pop(); };
@@ -362,7 +442,7 @@ const nn = n => Number.isInteger(n) && n > 0 ? n : 0;
 const isCard = c => Number.isInteger(c) && c >= 0 && c < 52;
 const newPlayer = (id, name, start, owner) => {
   const p = { id, name, start, balance: start, added: 0, takes: 0, bet: 0, hand: 0, doubled: false, out: false, last: 0, trivia: 0, triviaAt: -1, vin: 0, vout: 0, hands: [], ins: 0, insDone: false, until: 0, idle: 0 };
-  p.rb = []; p.rrep = []; p.rl = null; p.vp = null;
+  p.rb = []; p.rrep = []; p.rl = null; p.vp = null; p.cb = []; p.cl = null;
   if (owner) p.owner = owner;
   return p;
 };
@@ -380,7 +460,7 @@ export function normalizeTable(t) {
         cards: (Array.isArray(h && h.cards) ? h.cards : []).filter(isCard).slice(0, 12), bet: nn(h && h.bet), doubled: !!h && h.doubled === true,
         done: !!h && h.done === true, bj: !!h && h.bj === true, res: h && typeof h.res === 'string' ? h.res.slice(0, 12) : '', net: h && Number.isInteger(h.net) ? h.net : 0 })),
       ins: nn(p.ins), insDone: p.insDone === true, until: nn(p.until), idle: nn(p.idle),
-      vp: vpNorm(p.vp), rb: roulNormBets(p.rb), rrep: roulNormBets(p.rrep),      // roulette: this spin's bets (kept on the player's chips until the spin) and the previous spin's, for Repeat
+      cb: crapsNormBets(p.cb), cl: p.cl && typeof p.cl === 'object' ? { net: Number.isInteger(p.cl.net) ? p.cl.net : 0, stake: nn(p.cl.stake), void: p.cl.void === true, items: (Array.isArray(p.cl.items) ? p.cl.items : []).filter(i => i && CR_KINDS.includes(i.k) && Number.isInteger(i.net)).slice(0, 12).map(i => ({ k: i.k, net: i.net })) } : null, vp: vpNorm(p.vp), rb: roulNormBets(p.rb), rrep: roulNormBets(p.rrep),      // roulette: this spin's bets (kept on the player's chips until the spin) and the previous spin's, for Repeat
       rl: p.rl && typeof p.rl === 'object' ? { net: Number.isInteger(p.rl.net) ? p.rl.net : 0, stake: nn(p.rl.stake), pay: nn(p.rl.pay), void: p.rl.void === true } : null };
     if (typeof p.owner === 'string' && p.owner) q.owner = p.owner;
     return q;
@@ -407,6 +487,7 @@ export function normalizeTable(t) {
       cards: (Array.isArray(dl.cards) ? dl.cards : []).filter(isCard).slice(0, 12), hole: dl.hole === true, shoeLeft: nn(dl.shoeLeft), dealerBJ: dl.dealerBJ === true },   // the dealer's PUBLIC cards (the hole card is not here)
     round: { n: Number.isInteger(rd.n) && rd.n > 0 ? rd.n : 1, phase: rd.phase === 'playing' ? 'playing' : 'betting' },
     roul: roulNormTable(t.roul),
+    craps: crapsNormTable(t.craps),
     dealer: typeof t.dealer === 'string' && REF_RE.test(t.dealer) ? t.dealer : '',          // '' = the host deals
     dealerReq: typeof t.dealerReq === 'string' && REF_RE.test(t.dealerReq) ? t.dealerReq : '',
     settings: { locked: st.locked === true, maxBuyin: isCents(st.maxBuyin) ? st.maxBuyin : 0,
@@ -415,7 +496,7 @@ export function normalizeTable(t) {
       triviaPct: Number.isInteger(st.triviaPct) && st.triviaPct >= 0 && st.triviaPct <= 20 ? st.triviaPct : 10, // trivia can pay up to this % of each player's buy-in
       rounds: st.rounds === false ? false : true,
       auto: st.auto === true,                                // the server deals (online dealer table)
-      game: st.game === 'roulette' || st.game === 'poker' ? st.game : 'blackjack',
+      game: GAMES.includes(st.game) ? st.game : 'blackjack',
       autoBet: st.autoBet === false ? false : true },        // repeat each player's last wager for the next round (they can still change it)          // rounds: wagers -> dealer Start -> hands -> next round
   };
 }
@@ -450,6 +531,38 @@ function applyCore(t, actor, a, ctx, ops) {
   const NOT_YOURS = 'You can only change your own chips.';
   if (!a || typeof a !== 'object') return deny('Unknown action.');
   if (!dealerPower && t.settings.locked) return deny('The host has paused the table.');
+  if (t.settings.game === 'craps') {
+    advance(t, ctx.secret, now, ctx.rand);
+    if (['cbet', 'cclear', 'cundo'].includes(a.type)) {
+      const p = t.players.find(q => mine(q));
+      if (!p) return deny('Take a seat first.');
+      if (t.craps.stage !== 'betting') return deny('The dice are rolling. Bets open again in a moment.');
+      const R = t.craps, locked = b => (b.k === 'pass' || b.k === 'dp') && R.phase === 'point';
+      if (a.type === 'cclear') { p.cb = p.cb.filter(locked); return { ok: true }; }
+      if (a.type === 'cundo') { for (let i = p.cb.length - 1; i >= 0; i--) if (!locked(p.cb[i])) { p.cb.splice(i, 1); break; } return { ok: true }; }
+      if (Number.isInteger(ctx.pot)) t.maxBet = maxBetFor(ctx.pot);
+      if (!CR_KINDS.includes(a.k)) return deny('That is not a bet on the table.');
+      if (!Number.isInteger(a.a) || a.a <= 0) return deny('Pick a chip first.');
+      if ((a.k === 'pass' || a.k === 'dp') && R.phase !== 'come') return deny('Pass and Don\'t Pass can only be bet before the point is set.');
+      if ((a.k === 'odds_pass' || a.k === 'odds_dp') && R.phase !== 'point') return deny('Odds can only be bet once a point is set.');
+      const next = p.cb.map(b => ({ k: b.k, a: b.a })), same = next.find(b => b.k === a.k);
+      if (same) same.a += a.a; else next.push({ k: a.k, a: a.a });
+      const amt = k => (next.find(b => b.k === k) || { a: 0 }).a;
+      if (a.k === 'odds_pass' && !amt('pass')) return deny('Odds go behind a Pass bet. Place a Pass bet first.');
+      if (a.k === 'odds_dp' && !amt('dp')) return deny('Odds go behind a Don\'t Pass bet. Place one first.');
+      if (amt('odds_pass') > CR_MAX_ODDS * amt('pass') || amt('odds_dp') > CR_MAX_ODDS * amt('dp')) return deny('Odds can be at most ' + CR_MAX_ODDS + ' times the line bet.');
+      const stake = crStake(next);
+      if (!ctx.noLimits) {
+        if (next.some(b => b.a < Math.min(MIN_BET, p.balance))) return deny('The smallest bet is ' + fmt(MIN_BET) + '.');
+        if (stake > betCap(p)) return deny('You can have at most ' + BET_BAL_PCT + '% of your chips on the table (' + fmt(betCap(p)) + ').');
+      }
+      if (stake > p.balance) return deny('You only have ' + fmt(p.balance) + ' in chips.');
+      if (crapsMaxWin(next, R.phase, R.point) > t.maxBet) return deny('The casino pays at most ' + fmt(t.maxBet) + ' on one roll (' + MAX_BET_PCT + '% of its pot). Lower your bets.');
+      p.cb = next;
+      return { ok: true };
+    }
+    if (['bet', 'hit', 'stand', 'double', 'split', 'insure', 'next', 'sitout', 'start', 'finish', 'settle', 'undo', 'add', 'rbet', 'rclear', 'rundo', 'rrepeat', 'vdeal', 'vdraw', 'dealer_request', 'dealer_cancel', 'dealer_reject', 'dealer_accept', 'dealer_set'].includes(a.type)) return deny('This is a craps table.');
+  } else if (['cbet', 'cclear', 'cundo'].includes(a.type)) return deny('This is not a craps table.');
   if (t.settings.game === 'poker') {
     if (['vdeal', 'vdraw'].includes(a.type)) {
       const p = t.players.find(q => mine(q));
@@ -578,7 +691,7 @@ function applyCore(t, actor, a, ctx, ops) {
       if (funded) {
         if (account < a.buyin) return deny('Not enough money in your bank account (' + fmt(account) + ').');
         t.players.push(newPlayer(t.nextId++, name, a.buyin, actor.ref));
-        if (auto && t.settings.game !== 'roulette' && t.settings.game !== 'poker') { const np = t.players[t.players.length - 1]; np.out = true; np.fresh = true; }      // a new player sits out until they place a bet, so nobody is dealt in by surprise
+        if (auto && t.settings.game === 'blackjack') { const np = t.players[t.players.length - 1]; np.out = true; np.fresh = true; }      // a new player sits out until they place a bet, so nobody is dealt in by surprise
         t.funded += a.buyin;
         bankOp(actor.ref, -a.buyin, 'buyin', 'Bought in at a table');
         return { ok: true, vault: -a.buyin, vaultRef: actor.ref };
@@ -1130,7 +1243,7 @@ export default {
     // Create a table: find an unused code, claim it, return the host's secret token.
     if (!m[1]) {
       if (request.method !== 'POST') return json({ error: 'method not allowed' }, 405);
-      let game = 'blackjack'; try { const cb = JSON.parse((await request.text()) || '{}'); if (cb && (cb.game === 'roulette' || cb.game === 'poker')) game = cb.game; } catch (e) { game = 'blackjack'; }
+      let game = 'blackjack'; try { const cb = JSON.parse((await request.text()) || '{}'); if (cb && GAMES.includes(cb.game)) game = cb.game; } catch (e) { game = 'blackjack'; }
       for (let i = 0; i < 8; i++) {
         const code = randomString(5, CODE_CHARS);
         const token = randomString(32, 'abcdefghijklmnopqrstuvwxyz0123456789');
@@ -1254,7 +1367,7 @@ export class Room {
       await this.state.storage.put('meta', { token, v: 0, updated: now, born: now });
       let ci = {}; try { ci = await (await reg(this.env, '/casino/get', {})).json(); } catch (e) { ci = {}; }
       const hostRef = REF_RE.test(request.headers.get('X-Ref') || '') ? request.headers.get('X-Ref') : '';
-      await this.state.storage.put('table', { players: [], history: [], hostRef, potStart: ci.pot || 0, epoch: ci.epoch || 0, maxBet: maxBetFor(ci.pot || 0) || DEFAULT_MAX_BET, settings: { auto: true, rounds: true, game: game === 'roulette' || game === 'poker' ? game : 'blackjack' } });   // new tables are online dealer tables
+      await this.state.storage.put('table', { players: [], history: [], hostRef, potStart: ci.pot || 0, epoch: ci.epoch || 0, maxBet: maxBetFor(ci.pot || 0) || DEFAULT_MAX_BET, settings: { auto: true, rounds: true, game: GAMES.includes(game) ? game : 'blackjack' } });   // new tables are online dealer tables
       return json({ ok: true });
     }
 
@@ -1271,12 +1384,12 @@ export class Room {
       let accName = ''; try { accName = decodeURIComponent(request.headers.get('X-Name') || ''); } catch (e) { accName = ''; }
       const act = body && body.action;
       let account;                                     // bank account balance, only fetched when an action spends from it
-      if (act && ref && ['seat', 'rebuy', 'vault_withdraw', 'vault_deposit', 'bet', 'rbet', 'rrepeat', 'vdeal', 'remove'].includes(act.type)) {      // an overdue loan freezes the account: no playing, no cashing out, repaying is still allowed
+      if (act && ref && ['seat', 'rebuy', 'vault_withdraw', 'vault_deposit', 'bet', 'rbet', 'rrepeat', 'vdeal', 'cbet', 'remove'].includes(act.type)) {      // an overdue loan freezes the account: no playing, no cashing out, repaying is still allowed
         let fz = false; try { fz = (await (await reg(this.env, '/vault/get', { ref })).json()).frozen === true; } catch (e) { fz = false; }
         if (fz) return json({ ok: false, error: 'Your account is frozen until your loan is repaid. Repay it on the Me tab.' }, 400);
       }
       if (act && ref && ['seat', 'rebuy', 'vault_withdraw'].includes(act.type)) account = (await (await reg(this.env, '/vault/get', { ref })).json()).balance;
-      let pot; if (act && (act.type === 'bet' || act.type === 'rbet' || act.type === 'rrepeat' || act.type === 'vdeal') && table.settings.auto) { try { pot = (await (await reg(this.env, '/casino/get', {})).json()).pot; } catch (e) { pot = undefined; } }
+      let pot; if (act && (act.type === 'bet' || act.type === 'rbet' || act.type === 'rrepeat' || act.type === 'vdeal' || act.type === 'cbet') && table.settings.auto) { try { pot = (await (await reg(this.env, '/casino/get', {})).json()).pot; } catch (e) { pot = undefined; } }
       const res = applyAction(table, { role: isHost ? 'host' : 'player', ref }, act, { funded: true, account, secret, now, name: accName, pot });
       if (!res.ok) return json({ ok: false, error: res.error }, 400);
       let vaultBalance;
@@ -1599,7 +1712,7 @@ export class Registry {
       const code = String(b.code || '');
       if (!/^[A-Z0-9]{4,6}$/.test(code)) return json({ error: 'bad request' }, 400);
       const old = await s.get('tb:' + code);
-      await s.put('tb:' + code, { code, game: b.game === 'roulette' || b.game === 'poker' ? b.game : 'blackjack', hostRef: REF_RE.test(String(b.hostRef || '')) ? b.hostRef : '', seats: Math.max(0, Math.min(99, b.seats | 0)), maxBet: Math.max(0, b.maxBet | 0), since: old ? old.since : Date.now(), seen: Date.now() });
+      await s.put('tb:' + code, { code, game: GAMES.includes(b.game) ? b.game : 'blackjack', hostRef: REF_RE.test(String(b.hostRef || '')) ? b.hostRef : '', seats: Math.max(0, Math.min(99, b.seats | 0)), maxBet: Math.max(0, b.maxBet | 0), since: old ? old.since : Date.now(), seen: Date.now() });
       return json({ ok: true });
     }
     if (path === '/lobby/close') { await s.delete('tb:' + String(b.code || '')); return json({ ok: true }); }
