@@ -83,3 +83,163 @@ Croupier and table
 4. Seats: up to [6].
 5. Build order: [blackjack, then roulette, then craps and poker, then the small-details pass].
 6. Tip the dealer button: cosmetic only [cosmetic only; routing into the pot would change the money invariant tests].
+
+---
+# PART 2: even more detail (2026-11-18, "MORE DETAIL TO EVERYTHING, THE BACKGROUND, EVERYTHING")
+Same rules: planning only, CSS / SVG / WebAudio only, everything cosmetic (no money moves), everything switchable off by the Lite mode.
+
+## A. The room behind the tables (the background, in layers)
+Parallax in 4 layers; each layer shifts 2 to 10px with device tilt (phones) or pointer position (desktop), 0 in Lite.
+1. Far wall: dark burgundy wallpaper with a damask pattern, gold-leaf crown molding, three framed paintings that are actually tiny SVG scenes (a horse race, a sailing ship, a hand of cards) with picture lights that glow. Mirrored pillars show a faint reflection of the lamps.
+2. Mid ground: a long bar with a bartender silhouette polishing a glass, rows of bottles that catch a slow colour sweep, a neon cocktail glass sign. Slot-machine row: 6 cabinets, each screen cycles symbols (cherry, bar, 7, bell, diamond) at a different rhythm, a "JACKPOT" light that chases. A velvet-rope VIP corner with a "RESERVED" brass sign (empty; tapping it says "Reserved for the high roller").
+3. Moving figures (all silhouettes, never clickable, 3 to 5 at most): a cocktail waitress crosses with a tray every ~3 minutes, a pit boss paces behind the dealer with arms crossed and glances at the table, a patron walks by in the far aisle. They never block the UI and stop in Lite.
+4. Foreground: the table, plus a soft blurred chandelier at the top edge with crystal sparkles (small star twinkles on a random crystal every 600ms).
+Ceiling and sky: a security dome ("the eye in the sky") with a tiny red light that blinks every 2s and swivels slightly toward whichever seat just won big.
+Big sign above the tables: "PROGRESSIVE POT $X" showing the live casino pot with a slot-machine style rolling odometer, and a "Pit open since HH:MM" clock-free line (real casinos have no clocks, so there is no clock; tapping the sign says "Time is not on the menu").
+Floor: carpet pattern with a repeating tiny dice-and-spade motif, a worn path (lighter strip) leading to the table, a dropped red chip in the corner that nobody picks up (tap it: "Finders keepers, not really").
+Windows: none (on purpose). A "No windows. No clocks." plaque on the wall.
+Time of night (uses the viewer's local clock, purely visual): 6pm to 9pm warm and bright, 9pm to 2am deepest gold with the most neon, 2am to 6am "last call": dim, the bartender yawns, fewer figures, a mop-bucket cart parked far away, 6am to 6pm "early shift": lights on a dim daylight setting and a quiet murmur.
+Weather-of-the-night sprinkles: December adds string lights and a small tree by the bar; Halloween (Oct 31) adds a cobweb on the lamp and pumpkin chips on the rail; New Year's Eve countdown confetti at midnight local time.
+Ambient layers: murmur (filtered noise), distant slot jingles (random 2 to 4 note blips every 8 to 20s), a faint glass clink, distant laughter blip. Each layer has its own gain and all duck 40% for 1.5s when somebody at the table wins big.
+
+## B. The felt and the table surface
+- Center watermark: a faint engraved crest with the table code and the game name; for blackjack the dealer-side arc text reads "DEALER MUST STAND ON ALL 17s".
+- Wear and life: subtle scuffs near each seat, a faint round drink-ring near the cup holder, three chip-dust specks on the felt, a single dropped card corner shadow that never moves.
+- Leather rail with stitching, brass studs every 40px that catch a highlight when the lamp wobbles, a small brass table-number plate, tiny cigarette-burn? no (keep it friendly); instead a polished brass ashtray-lid used as a coaster for the dealer's glass of water.
+- Your seat has a beverage: pick a drink in settings (soda, coffee, club soda, tea, mocktail); a tiny glass with steam or bubbles animating on the rail by your seat.
+- Table colour options (cosmetic unlockables, see N): green, blue, burgundy, black-and-gold.
+
+## C. Cards (the stars)
+- Card back: a navy and gold lattice with the app's spade-chip crest in the middle; a 1px inner border; slight sheen sweep when dealt.
+- Faces: crisp corner index (rank and suit) top-left and bottom-right rotated; centre pips laid out correctly for 2 to 10; J, Q, K drawn as simple flat SVG figures in two colours; ace of spades extra large and ornate.
+- Edge thickness: a 1px lighter edge on the bottom so a stack looks 3D; stacks at the shoe have a visible slab thickness proportional to the cards left.
+- Sound per card: three slap variants, random pitch +-6%, volume tied to the throw distance (far seats are a touch quieter).
+- Cards cling: when a split pair is dealt, the second card sits 8px lower and 6px right, like real hand-fanned cards.
+- 4-colour deck option (accessibility): spades black, hearts red, diamonds blue, clubs green.
+- Result tint: a winning hand's cards get a thin gold underline glow, a losing hand dims to 70% and slides 6px away from the bet.
+
+## D. Chips
+- Design: a face with 8 edge spots (rotating pattern per denomination), an inner ring with the value in engraved type, the crest in the middle. Colours: $5 red, $10 blue, $25 green, $50 orange, $100 black, $500 purple, $1,000 yellow; bigger stacks mix colours using a greedy colour-up.
+- Stack drawing: each chip is offset by 1 to 2px randomly in x, rotated +-2 degrees, 3px high; a faint contact shadow beneath each stack; stacks of over 20 are split in two (the dealer rule).
+- Chip riffling: when you sit idle for 20s your top chips do a tiny finger-flip animation, and the dealer's rack settles with a click.
+- Chip sounds scale with stack size: one chip is a light tick, five is a clatter, twenty is a cascade (3 overlapped clack bursts).
+- Win flight: payout chips fly from the rack on a curved path (a quadratic bezier), 40ms apart, landing with a slight bounce.
+- Long-press any chip stack to see its total value in a small tooltip (a paper slip).
+
+## E. People and idle life
+- Dealer idle moves (every 6 to 12s, one random): straightens bow tie, glances at a seat then another, riffles a stack of chips, wipes the felt with a hand, taps the table twice.
+- Seat avatars blink every 3 to 6s, and get a small sweat-drop when they are on 20 or more with a dealer up card of 10.
+- Emotes: tap a seat's avatar to send a quick reaction (clap, fire, grimace, sunglasses, heart, "gg"); the emoji floats up from that seat for 1.5s; max 1 every 3s; no free text (kid-safe and spam-safe). Everyone sees it.
+- Table chatter bubbles (from presets only): "Nice hand!", "Ouch.", "Hit me!", "Feeling lucky", "Last one, I swear".
+- Dealer personalities (random per table, shown on a tiny name card): Dee (warm, jokes), Marco (dry), Priya (cheerful), Lou (old-school, says "kid"). Each has their own lines (20 per dealer) for deal, win, lose, bust, blackjack, shuffle, idle, and a goodbye when you leave.
+- Pit boss: appears at the edge of the table when a pot-limit message shows ("The pit boss says that is over the limit.").
+
+## F. Roulette extras
+- Wheel lacquer: highlights that slide as the wheel turns, the lamp reflected as a soft white arc on the polished ring, the pocket numbers engraved in gold with a slight inset shadow.
+- Ball: a small glossy white ball with a tiny moving glint; it casts a short shadow on the pocket ring; when it rattles, tiny sparks (2px dots) fly at each deflector hit.
+- Turret: spinning brass cross with a faint rainbow reflection in Fancy mode.
+- Racetrack (the oval betting area beside the main grid): Voisins du Zéro, Tiers du Cylindre, Orphelins labels as quick-bet shortcuts (American version: simple "Neighbors of 0" group bets are optional later).
+- Hot/cold: flame icon on numbers hit twice in a row in the last 20 spins, snowflake on numbers not seen in 50.
+- Result sign: an LED panel above the wheel flashes the winning number with colour and "ODD / EVEN / LOW / HIGH" tags, then dims and keeps the last 20 as a ticker.
+- Croupier rake: a long rake sweeps the board to clear losing chips, with a swish sound.
+- Dealer says the number: "Seventeen, black." in a bubble; "Double zero, green." for 00; "Zero." for 0.
+- "Chip colours" per player via a coloured rim stripe to tell bets apart on the shared board.
+
+## G. Craps extras
+- Dice: translucent red cubes with white pips and a thin serial number etched on a face (decorative), real CSS 3D cubes tumbling with random axes (three rotations), rounded corners, the shadow squashing as they bounce.
+- Shooter: a hand silhouette tosses from the table edge nearest the active seat; the shooter's name plate lights up and a "Shooter" sash appears.
+- Table staff: stickman (bent stick and a bow tie), a boxman seated at the center with a chip stack, two base dealers; tiny sweat/pose animations.
+- Proposition box in the middle with illustrated bets (hard ways with dice icons, horn, whirl icon), printed even if some are not playable yet (they show "coming soon" with a ribbon).
+- Sound: dice rattle in the hand (filtered noise 400ms), a hit on the back wall (a short wood knock with a rubbery decay), skitter on felt, a chip toss.
+- Crowd: when a point is made, a soft cheer blip; on a seven-out, a mock groan.
+- Points board: the six point numbers with little brass marker discs; "ON" puck slides with a small wooden clack.
+
+## H. Video poker extras
+- Screen: CRT scanlines at 4% opacity, a slight screen curve with an inner vignette, a very faint flicker (every 8s one 60ms dim), glass reflection streak across the top left.
+- Seven-segment credit and bet readouts that count; button panel with real-looking plastic buttons (HOLD under each card, DEAL/DRAW, BET ONE, BET MAX) that depress 2px with a click.
+- Attract mode: after 45s idle the cards flash a demo royal flush, the marquee goes faster, and a "PRESS DEAL TO PLAY" text blinks.
+- Payout: a coin hopper sound burst and coins spill into a tray at the bottom of the cabinet (tiny SVG coins piling up, shown for 3s).
+- Ticket printer: a paper ticket slides out with the date, table code and the win amount; it stays in the corner and tapping it tears it off.
+
+## I. The rest of the app, themed as a casino (every tab is part of the building)
+- Opening: first time you arrive, the doors slide open (two big wooden doors) onto a red carpet with a doorman "Welcome in. First time? Look around." The doors play only once per device, then skip.
+- Lobby ("the floor"): table cards laid out like a floor map; a busy table has a warm lamp and a small crowd dot count; the empty ones are dim. A "Pit boss recommends" star on the busiest table.
+- Table tab simplified: "Take a seat" is a sign with brass letters; the host's table code on a brass plate you can tap to copy.
+- Board (leaderboard): framed portraits on a wall; top 3 get gold, silver and bronze frames with a little light above each, the rest hang as smaller frames; names on brass plates; a "Hall of fame" for past-lockdown survivors.
+- Bank tab ("the cage"): a teller window with a brass grill, a counter with money-counting animation, your ledger as thermal-paper receipts with zigzag torn edges and a monospace font; a stamp animation ("PAID", "RECEIVED") when a transfer lands; a tiny "NEXT WINDOW PLEASE" sign.
+- Loans: a casino marker slip with a handwriting-style signature that draws itself, a due date stamp in red; overdue turns the slip red with a "PAST DUE" stamp and the pit boss icon looks at you.
+- Daily bonus: a "COMP" coupon tearing off a perforated strip, with a sparkle; or a fortune-cookie crack that reveals a one-line fortune ("A pair of eights is nothing to split about") and the bonus amount.
+- Trivia: the "pit boss quiz" with a buzzer sound and a game-show style countdown bar.
+- Lockdown screen: rolling steel shutters come down across the whole screen with a rattle, a "CLOSED FOR RENOVATION" sign swings on a chain, the countdown glows in neon, and a tiny crew of paint-roller silhouettes work behind the shutter; at zero the shutters roll up and the doors slide open with fanfare.
+- Onboarding: a host greeter bubble that points at things with a golden arrow ("Tap here to take a seat").
+- Me tab: your player card as a membership card (the casino's rewards club), with your name, tier (Bronze, Silver, Gold, Platinum by hands played, cosmetic only), a barcode-like pattern, and a member-since date.
+- Empty states have a character: "No tables open. The floor is quiet. Start one?" with a sleepy dealer.
+- Loading: a spinning chip with rotating lines ("Shuffling 6 decks…", "Counting the chips…", "Dusting the felt…", "Waking the dealer…", "Polishing the roulette ball…").
+- Errors in voice: "The pit boss says no: that bet is too big." / "The cage is closed for a moment. Try again." / "Lost the connection. The dealer is holding your seat."
+
+## J. Typography, colour and copy
+- Fonts (system stacks only, no downloads): engraved brass plates use `Georgia, "Times New Roman", serif` uppercase with 0.12em tracking; neon uses `"Arial Rounded MT Bold", system-ui` with a glow text-shadow; receipts use `ui-monospace, Menlo, Consolas`; scoring digits are tabular.
+- Neon: double text-shadow (tight and wide) in the same hue, 2 to 3 second slow flicker with a rare double-blink, never faster than 3 flashes per second (photosensitivity).
+- Colour tokens kept in CSS variables so a seasonal or table theme only swaps the variables.
+- Voice: warm, a little cheeky, never insulting. Every message under 12 words. No exclamation spam.
+
+## K. Sound design sheet (all WebAudio, no files; master volume and mute remembered in localStorage inside try/catch)
+| Sound | Recipe | Notes |
+| --- | --- | --- |
+| Card slap | white noise 35ms, highpass 800Hz, fast decay | 3 variants, pitch +-6% |
+| Card flip | two 12ms noise bursts 60ms apart | quieter |
+| Chip clack | sines 2.4kHz and 3.1kHz, 25ms each, decay 60ms | pitch up with stack size |
+| Chip cascade | 6 clacks over 220ms at random pitch | payouts |
+| Shuffle | noise 1.2s, bandpass 1.5kHz, 8 amplitude pulses | riffle |
+| Wheel tick | square 1.6kHz, 18ms | rate follows the wheel |
+| Ball bounce | sine 900Hz 40ms plus noise 20ms | 3 bounces, decaying |
+| Dice rattle | noise 400ms, bandpass 2kHz modulated at 18Hz | |
+| Wall knock | sine 180Hz 80ms, fast decay | craps |
+| Win chime | C5, E5, G5 arpeggio 90ms apart | triangle wave |
+| Blackjack sting | C5 to C6 sweep plus shimmer | gold ring burst |
+| Bust thud | sine 90Hz 220ms, pitch drop | |
+| Button click | 8ms noise + 1.2kHz blip | UI |
+| Buzzer | square 120Hz 300ms | trivia wrong |
+| Shutter rattle | filtered noise 1.5s with 12Hz tremolo | lockdown |
+Music: a short generated lounge loop (walking bass on triangle, brushed noise hi-hat, a sparse electric piano), 8 bars, OFF by default; ducks when sound effects play.
+Every sound also has a visual cue (a captions flash) so sound-off players miss nothing.
+
+## L. Accessibility details
+- 4-colour deck option, larger text option, high-contrast felt option.
+- Left-handed layout: my-hand action panel on the left.
+- Every animated thing has a still equivalent, and `prefers-reduced-motion` removes loops.
+- Tap targets 44px, no important info in colour alone (hands have text results, chips have numbers).
+- Haptics are optional, off in Lite.
+
+## M. Micro-interactions in the app chrome
+- Tab bar: a brass underline slides between tabs (180ms); the active icon gets a soft glow.
+- Buttons: press-in 2px with shadow shrink, and a quick 60ms highlight ripple.
+- Toggles: a tiny chip flips to show on/off.
+- Numbers: every balance counts up or down; a small plus/minus delta chip floats away from it.
+- Pull-to-refresh on the lobby: a chip spins and lands flat.
+- Toasts are little paper slips that slide in from the top with a slight tilt and a paperclip.
+- Copy-code: the plate flashes brass and shows "Copied" for 1.2s.
+- Focus rings in brass, 2px.
+
+## N. Cosmetic collection (no money, no advantage)
+- Unlocks by playing: card backs (navy, red diamond, black and gold, neon grid), felt colours (green, blue, burgundy, black-and-gold), chip edge styles, nameplate frames (brass, silver, copper, neon), avatar frames, dealer choice at a hosted table, table lamp moods.
+- Milestones: first win, first blackjack, 25 and 100 hands, first loan repaid, first craps point made, first royal flush, surviving a lockdown, 7 wins in a row, a visit at 3am.
+- Reward is a cosmetic plus a toast; shown on the Me tab membership card.
+
+## O. Easter eggs (never required, always delightful)
+- Tap the shoe 7 times: "Lucky 7" confetti and a sparkle on the next card.
+- Konami code on the Me tab: the felt turns gold for the session.
+- Lose 7 hands in a row: the dealer slides a "sympathy cookie" (cosmetic emoji) and says "On the house."
+- Win with exactly 21 using 5 cards: a "Charlie!" banner and bell.
+- Tap the neon OPEN sign: it says CLOSED for a second.
+- Tap the security dome: the camera waves.
+- Seven-out followed by a point made on the next roll: stickman says "Back from the dead".
+- Roulette lands the same number twice: "Déjà vu" toast.
+- Leave a seat with a profit: the dealer says "Come back soon."
+
+## P. Build budget and guardrails
+- Target: 60fps on a mid phone; budget 6ms per frame for effects; use transforms and opacity only; one `requestAnimationFrame` loop shared by every effect; stop when hidden.
+- File size: all art is inline SVG symbols reused with `<use>`; keep the added code under about 120KB (the page is one HTML file); lazy-build the heavy parts (wheel, dice, silhouettes) the first time a table of that type opens.
+- All new effects register in one `FX` module with `enabled(level)` so Lite/Fancy/Off is one switch.
+- Testing: a Playwright run per surface (screenshots in Fancy and Lite), a frame-time check, a reduced-motion check, a check that the page still works with all effects forced off, and the money-invariant suites unchanged.
+- Order inside step 15: 15a felt + room, 15b dealing + chips + hand panel, 15c roulette wheel, 15d craps and poker, 15e collectibles, sounds, easter eggs, 15f performance and accessibility pass. Chrome and app-wide theming (section I and M) come with 15e.
