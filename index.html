@@ -121,6 +121,76 @@
   .vp-res { font-size:18px; font-weight:800; margin:22px 0 4px; }
   .vp-pay { display:grid; grid-template-columns:1fr auto; gap:2px 12px; font-size:13px; max-width:300px; margin:8px 0; }
   .vp-pay .on { color:#f5c542; font-weight:800; }
+
+  /* ---------- step 15a: the blackjack room and felt table ---------- */
+  .bjstage { position:relative; width:100%; max-width:560px; margin:10px auto 4px; aspect-ratio: 360 / 460; overflow:hidden; border-radius:18px; background:#1a0b10; box-shadow:0 10px 30px #000a, inset 0 0 0 1px #ffffff12; isolation:isolate; user-select:none; -webkit-user-select:none; }
+  .bjstage svg.bjart { position:absolute; inset:0; width:100%; height:100%; display:block; }
+  .bj-room { position:absolute; inset:0; z-index:0; background:
+      radial-gradient(120% 60% at 50% 0%, #4a1626 0%, #2b0d17 55%, #14070c 100%); }
+  .bj-room::before { content:""; position:absolute; left:0; right:0; top:0; height:42%; background:
+      repeating-linear-gradient(135deg, #ffffff06 0 2px, transparent 2px 14px), repeating-linear-gradient(45deg, #00000022 0 2px, transparent 2px 14px); }
+  .bj-room::after { content:""; position:absolute; left:0; right:0; top:34%; height:4px; background:linear-gradient(#c9a24b,#7a5a1c); box-shadow:0 2px 6px #000a; }
+  .bj-frame { position:absolute; top:6%; width:15%; height:10%; border:3px solid #c9a24b; border-radius:3px; background:linear-gradient(160deg,#2a4b6a,#16283a); box-shadow:0 0 14px #ffd98a55, inset 0 0 8px #000a; z-index:1; }
+  .bj-frame i { position:absolute; left:50%; bottom:6%; width:50%; height:14%; transform:translateX(-50%); background:#c9a24b66; border-radius:50%; filter:blur(2px); }
+  .bj-slots { position:absolute; left:0; right:0; top:19%; height:15%; display:flex; justify-content:space-around; align-items:flex-end; z-index:1; padding:0 4%; }
+  .bj-slot { width:11%; height:100%; background:linear-gradient(#3a2a4a,#1a1022); border-radius:6px 6px 2px 2px; border:1px solid #ffffff22; position:relative; box-shadow:0 0 10px #ff4fb344; }
+  .bj-slot::before { content:""; position:absolute; left:12%; right:12%; top:14%; height:34%; background:linear-gradient(90deg,#ffcf5a,#ff6b9a,#6be8ff); opacity:.85; border-radius:3px; animation: bjslot 2.4s steps(3) infinite; }
+  .bj-slot::after { content:""; position:absolute; left:20%; right:20%; bottom:10%; height:10%; background:#ffd24a; border-radius:2px; animation: bjblink 1.2s infinite; }
+  .bj-slot:nth-child(2n)::before { animation-duration:3.1s; } .bj-slot:nth-child(3n)::after { animation-delay:.4s; }
+  @keyframes bjslot { 0% { filter:hue-rotate(0deg); } 100% { filter:hue-rotate(360deg); } }
+  @keyframes bjblink { 0%,100% { opacity:1; } 50% { opacity:.25; } }
+  .bj-neon { position:absolute; right:5%; top:2.2%; z-index:3; font:800 11px/1 "Arial Rounded MT Bold", system-ui, sans-serif; letter-spacing:.18em; color:#ff9db8; text-shadow:0 0 4px #ff4f86, 0 0 12px #ff4f86, 0 0 24px #ff1f66; border:2px solid #ff4f86; padding:3px 6px; border-radius:6px; box-shadow:0 0 8px #ff4f86aa, inset 0 0 6px #ff4f8666; animation: bjneon 7s infinite; }
+  @keyframes bjneon { 0%,100% { opacity:1; } 46% { opacity:1; } 47% { opacity:.35; } 48% { opacity:1; } 50% { opacity:.4; } 51% { opacity:1; } }
+  .bj-pot { position:absolute; left:4%; top:2.2%; z-index:3; font:700 9px/1.2 Georgia, serif; letter-spacing:.14em; text-transform:uppercase; color:#ffe9a8; background:#000a; border:1px solid #c9a24b; border-radius:5px; padding:3px 6px; box-shadow:0 0 8px #c9a24b55; }
+  .bj-pot b { display:block; font:800 12px/1.1 ui-monospace, Menlo, Consolas, monospace; letter-spacing:.04em; color:#ffd24a; }
+  .bj-lamp { position:absolute; left:50%; top:-10%; width:130%; height:95%; transform:translateX(-50%); z-index:2; pointer-events:none; background:radial-gradient(closest-side at 50% 0%, #ffe9b055 0%, #ffd98a22 40%, transparent 72%); mix-blend-mode:screen; animation: bjlamp 4.3s ease-in-out infinite; }
+  @keyframes bjlamp { 0%,100% { opacity:.9; transform:translateX(-50%) rotate(-.3deg); } 50% { opacity:1; transform:translateX(-50%) rotate(.3deg); } 78% { opacity:.82; } }
+  .bj-mote { position:absolute; width:3px; height:3px; border-radius:50%; background:#ffe9b0; opacity:.5; z-index:4; pointer-events:none; animation: bjmote 40s linear infinite; }
+  @keyframes bjmote { 0% { transform:translate(0,0); opacity:0; } 10% { opacity:.55; } 50% { transform:translate(30px,-60px); } 90% { opacity:.4; } 100% { transform:translate(-20px,-130px); opacity:0; } }
+  .bj-dome { position:absolute; left:50%; top:0; width:20px; height:10px; transform:translateX(-50%); border-radius:0 0 20px 20px; background:radial-gradient(circle at 50% 20%, #444, #111); z-index:3; box-shadow:0 2px 4px #000a; }
+  .bj-dome::after { content:""; position:absolute; left:50%; bottom:2px; width:3px; height:3px; margin-left:-1.5px; border-radius:50%; background:#ff2d2d; box-shadow:0 0 5px #ff2d2d; animation: bjblink 2s infinite; }
+  /* table pieces (stage coordinates are percentages of 360 x 460) */
+  .bj-dealer { position:absolute; left:50%; top:15%; transform:translateX(-50%); z-index:6; text-align:center; width:44%; }
+  .bj-dealer .bust { width:34px; height:34px; margin:0 auto; border-radius:50%; background:radial-gradient(circle at 50% 35%, #f3d3b4 0 38%, #1b1b1f 39%); border:2px solid #c9a24b; display:flex; align-items:center; justify-content:center; font-size:18px; box-shadow:0 2px 6px #000a; }
+  .bj-dealer .dname { font:700 9px/1 Georgia, serif; letter-spacing:.14em; text-transform:uppercase; color:#ffe9a8; margin:2px 0 3px; }
+  .bj-bubble { position:absolute; left:50%; top:0; transform:translate(-50%, -112%); background:#fffbe9; color:#222; border-radius:10px; padding:4px 8px; font:600 10px/1.2 system-ui, sans-serif; min-width:60px; max-width:150px; box-shadow:0 2px 8px #0008; z-index:9; }
+  .bj-bubble::after { content:""; position:absolute; left:50%; bottom:-5px; width:9px; height:9px; margin-left:-4px; background:#fffbe9; transform:rotate(45deg); }
+  .bj-dealer .dkcards { margin:2px 0; min-height:0; gap:0; }
+  .bj-dealer .dkcards .dkc { width:30px; height:43px; font-size:12px; margin-left:-8px; } .bj-dealer .dkcards .dkc:first-child { margin-left:0; }
+  .bj-total { display:inline-block; background:#000b; color:#fff; font:800 10px/1 system-ui; border-radius:8px; padding:2px 6px; margin-top:2px; }
+  .bj-shoe { position:absolute; right:7%; top:17%; width:12%; height:7%; z-index:5; background:linear-gradient(#222,#0b0b0d); border:1px solid #c9a24b; border-radius:3px 3px 8px 3px; box-shadow:0 3px 6px #000a; transform:skewX(-14deg); }
+  .bj-shoe::before { content:""; position:absolute; left:8%; right:8%; top:-22%; height:30%; background:repeating-linear-gradient(90deg,#f4f6f4 0 2px,#cfd3cf 2px 3px); border-radius:2px; }
+  .bj-shoe::after { content:""; position:absolute; left:0; right:0; bottom:0; height:25%; background:#c9a24b55; }
+  .bj-tray { position:absolute; left:7%; top:17.5%; width:15%; height:5.5%; z-index:5; background:linear-gradient(#2a2a2e,#0e0e10); border:1px solid #c9a24b; border-radius:4px; box-shadow:0 3px 6px #000a; }
+  .bj-tray i { position:absolute; left:6%; right:6%; bottom:14%; height:0; background:repeating-linear-gradient(90deg,#f4f6f4 0 2px,#bfc4bf 2px 3px); border-radius:1px; }
+  .bj-rack { position:absolute; left:50%; top:39.5%; transform:translateX(-50%); z-index:5; display:flex; gap:3px; background:linear-gradient(#3a2415,#1f1209); border:1px solid #6b4a2c; border-radius:4px; padding:3px 6px 2px; box-shadow:0 3px 6px #000a; }
+  .bj-rack .bst { width:11px; }
+  .bst { position:relative; width:16px; height:34px; }
+  .bst i { position:absolute; left:0; right:0; height:6px; border-radius:50%; border:1px dashed #ffffffaa; box-sizing:border-box; box-shadow:0 1.5px 0 #0007; }
+  .bj-seat { position:absolute; z-index:7; transform:translate(-50%, -100%); width:17%; text-align:center; transition:left .25s ease, top .25s ease; }
+  .bj-seat.me { z-index:8; transform:translate(-50%, -100%) scale(1.18); }
+  .bj-seat .dkcards { margin:0; min-height:0; gap:0; justify-content:center; flex-wrap:nowrap; }
+  .bj-seat .dkc { width:26px; height:37px; font-size:11px; margin-left:-13px; } .bj-seat .dkc:first-child { margin-left:0; }
+  .bj-seat .hand2 { margin-top:2px; }
+  .bj-seat .bj-total { margin:2px 0; }
+  .bj-seat .chip-res { margin:0 0 1px; font-size:9px; padding:1px 6px; display:inline-block; }
+  .bj-ring { position:relative; width:34px; height:34px; margin:2px auto 0; border-radius:50%; border:2px solid #ffffff55; box-shadow:inset 0 0 6px #0008; display:flex; align-items:flex-end; justify-content:center; }
+  .bj-ring .bst { position:absolute; left:50%; bottom:6px; transform:translateX(-50%); width:20px; height:20px; }
+  .bj-ring .bst i { height:5px; }
+  .bj-ring .bet { position:absolute; left:50%; top:100%; transform:translate(-50%, 1px); font:800 9px/1 system-ui; color:#ffe9a8; text-shadow:0 1px 2px #000; white-space:nowrap; }
+  .bj-seat.turn .bj-ring { border-color:#ffd24a; box-shadow:0 0 0 2px #ffd24a66, 0 0 14px #ffd24a; animation: bjturn 1.4s ease-in-out infinite; }
+  @keyframes bjturn { 50% { box-shadow:0 0 0 4px #ffd24a33, 0 0 22px #ffd24a; } }
+  .bj-plate { margin:12px auto 0; background:linear-gradient(#e0c06a,#9a7a2c); color:#2a1d05; border-radius:4px; border:1px solid #5b4310; padding:2px 3px; font:700 9px/1.15 Georgia, serif; letter-spacing:.06em; text-transform:uppercase; box-shadow:0 2px 4px #000a, inset 0 1px 0 #fff6; }
+  .bj-plate .av { display:inline-block; width:12px; height:12px; line-height:12px; border-radius:50%; font:800 8px/12px system-ui; color:#fff; margin-right:3px; vertical-align:-2px; }
+  .bj-plate .nm { display:inline-block; max-width:48px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; vertical-align:bottom; }
+  .bj-plate .bal { display:block; font:800 9px/1.1 ui-monospace, Menlo, Consolas, monospace; letter-spacing:0; text-transform:none; }
+  .bj-seat.empty { opacity:.4; } .bj-seat.empty .bj-ring { border-style:dashed; } .bj-seat.empty .bj-plate { background:none; border:0; color:#ffe9a8aa; box-shadow:none; text-shadow:none; }
+  .bj-seat.out .bj-plate { filter:grayscale(.8); opacity:.75; }
+  .bj-plaque { position:absolute; left:50%; bottom:1.2%; transform:translateX(-50%); z-index:6; font:700 8px/1 Georgia, serif; letter-spacing:.16em; text-transform:uppercase; color:#2a1d05; background:linear-gradient(#e0c06a,#9a7a2c); border:1px solid #5b4310; border-radius:3px; padding:2px 8px; box-shadow:0 1px 3px #000a; }
+  .bj-wait { position:absolute; left:50%; top:58%; transform:translate(-50%,-50%); z-index:6; width:60%; text-align:center; font:700 11px/1.3 Georgia, serif; color:#ffe9a8; text-shadow:0 1px 3px #000; letter-spacing:.04em; }
+  .bjctl { margin-top:6px; }
+  body.lite .bj-lamp, body.lite .bj-mote, body.lite .bj-neon, body.lite .bj-slot::before, body.lite .bj-slot::after, body.lite .bj-dome::after, body.lite .bj-seat.turn .bj-ring { animation:none; }
+  body.lite .bj-mote { display:none; }
   .rbar { display:flex; align-items:center; justify-content:space-between; gap:10px; flex-wrap:wrap; }
   .rbar .big { font-size:20px; font-weight:800; }
   .rbar .sub2 { color: var(--muted, #9aa59d); font-size:13px; margin-top:2px; }
@@ -153,7 +223,8 @@
   .dkcards { display:flex; gap:6px; justify-content:center; flex-wrap:wrap; min-height:62px; margin:6px 0; }
   .dkc { width:42px; height:60px; border-radius:7px; background:#f4f6f4; color:#111; font-weight:800; font-size:17px; display:flex; flex-direction:column; align-items:center; justify-content:center; line-height:1.05; box-shadow:0 2px 6px #0008; }
   .dkc.red { color:#c0262d; }
-  .dkc.back { background:repeating-linear-gradient(45deg,#1e9d54,#1e9d54 6px,#157a41 6px,#157a41 12px); color:transparent; border:2px solid #f4f6f4; }
+  .dkc.back { background:repeating-linear-gradient(45deg,#14305c 0 4px,#0e2243 4px 8px), #14305c; background-blend-mode:normal; color:transparent; border:2px solid #f4f6f4; box-shadow:inset 0 0 0 2px #c9a24b, 0 2px 6px #0008; position:relative; }
+  .dkc.back::after { content:"♠"; position:absolute; inset:0; display:flex; align-items:center; justify-content:center; color:#c9a24b; font-size:16px; text-shadow:0 0 6px #000; }
   .dseat { border-top:1px solid var(--line); padding:8px 0; }
   .dseat.me { background:rgba(46,204,113,.08); border-radius:10px; padding:8px; }
   .dseat .dn { display:flex; justify-content:space-between; gap:8px; font-weight:700; }
@@ -316,12 +387,12 @@
   #welcomePanel li { margin-bottom: 6px; }
   .choice { border: 1px solid var(--line); border-radius: 14px; padding: 14px; margin-bottom: 12px; }
   .choice h3 { margin: 0 0 4px; font-size: 18px; }
-  .lobby-row { display:flex; align-items:center; gap:10px; padding:10px 0; border-top:1px solid var(--line); }
+  .lobby-row { display:flex; flex-wrap:wrap; align-items:center; gap:8px 12px; padding:12px 0; border-top:1px solid var(--line); }
   .lobby-row:first-child { border-top:0; }
-  .lobby-row .lt { flex:1; min-width:0; }
+  .lobby-row .lt { flex:1 1 150px; min-width:0; }
   .lobby-row .lt b { display:block; font-size:16px; }
   .lobby-row .lt span { color: var(--muted); font-size:13px; }
-  .lobby-row button { min-height:44px; padding:0 18px; }
+  .lobby-row button.btn-add { width:auto; flex:0 0 auto; margin:0; min-height:44px; padding:0 22px; font-size:16px; }
   .choice .online-status { margin-bottom: 8px; }
   .rou-hist { display:flex; gap:5px; flex-wrap:wrap; margin:8px 0; }
   .rn { min-width:30px; height:30px; padding:0 4px; border-radius:50%; display:inline-flex; align-items:center; justify-content:center; font-weight:800; font-size:13px; color:#fff; border:0; }
@@ -2557,11 +2628,55 @@ var Core = (function () {
     return 'Hit';
   }
   var LBL = { win: 'WIN', loss: 'LOSS', bust: 'BUST', push: 'PUSH', blackjack: 'BLACKJACK' };
+  var BJ_DENOMS = [[100000, '#f2c200'], [50000, '#8a3fd1'], [10000, '#222'], [5000, '#f08a00'], [2500, '#1e9d54'], [1000, '#2f6fe0'], [500, '#d2343c']];
+  function bjChips(amount, maxN) {
+    var out = [], left = Math.max(0, amount | 0);
+    for (var i = 0; i < BJ_DENOMS.length && out.length < (maxN || 6); i++) { while (left >= BJ_DENOMS[i][0] && out.length < (maxN || 6)) { out.push(BJ_DENOMS[i][1]); left -= BJ_DENOMS[i][0]; } }
+    if (!out.length && amount > 0) out.push('#d2343c');
+    return out;
+  }
+  function bjStack(amount, maxN) {
+    var st = el('div', 'bst'), cs = bjChips(amount, maxN), h = 34;
+    cs.forEach(function (c, i) { var d = document.createElement('i'); d.style.background = c; d.style.bottom = (i * 3.2) + 'px'; d.style.marginLeft = (i % 2 ? 0.6 : -0.4) + 'px'; st.appendChild(d); });
+    return st;
+  }
+  var BJ_DEALERS = ['Dee', 'Marco', 'Priya', 'Lou'];
+  function bjHash(str) { var h = 0; str = String(str || ''); for (var i = 0; i < str.length; i++) h = (h * 31 + str.charCodeAt(i)) >>> 0; return h; }
+  function bjColor(name) { return 'hsl(' + (bjHash(name) % 360) + ',55%,38%)'; }
+  function bjSeatPos(i, n) {
+    var tFrom = 158, tTo = 22, t = n <= 1 ? 90 : tFrom + (tTo - tFrom) * (i / (n - 1)), r = t * Math.PI / 180;
+    return { x: 50 + 41.5 * Math.cos(r), y: 62 + 27 * Math.sin(r) };
+  }
+  function bjLamp(stage) {
+    var room = el('div', 'bj-room'); stage.appendChild(room);
+    [14, 70].forEach(function (l) { var f = el('div', 'bj-frame'); f.style.left = l + '%'; f.appendChild(document.createElement('i')); stage.appendChild(f); });
+    var sl = el('div', 'bj-slots'); for (var k = 0; k < 6; k++) sl.appendChild(el('div', 'bj-slot')); stage.appendChild(sl);
+    stage.appendChild(el('div', 'bj-dome'));
+    stage.appendChild(el('div', 'bj-neon', 'OPEN'));
+    var pot = el('div', 'bj-pot', 'Progressive pot'); pot.appendChild(el('b', null, casinoPot === null ? '' : Core.fmt(casinoPot))); stage.appendChild(pot);
+    var NS = 'http://www.w3.org/2000/svg';
+    var svg = document.createElementNS(NS, 'svg'); svg.setAttribute('class', 'bjart'); svg.setAttribute('viewBox', '0 0 360 460'); svg.setAttribute('aria-hidden', 'true'); svg.style.zIndex = '3';
+    svg.innerHTML = '<defs><radialGradient id="bjFelt" cx="50%" cy="38%" r="75%"><stop offset="0" stop-color="#128a56"/><stop offset=".62" stop-color="#0b6a40"/><stop offset="1" stop-color="#06452a"/></radialGradient>'
+      + '<filter id="bjNoise" x="0" y="0" width="100%" height="100%"><feTurbulence type="fractalNoise" baseFrequency=".9" numOctaves="2" seed="4"/><feColorMatrix values="0 0 0 0 0  0 0 0 0 0  0 0 0 0 0  0 0 0 .09 0"/></filter>'
+      + '<linearGradient id="bjRail" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#4a2c1b"/><stop offset="1" stop-color="#1f100a"/></linearGradient>'
+      + '<path id="bjArc1" d="M52 232 Q180 192 308 232"/><path id="bjArc2" d="M70 258 Q180 222 290 258"/><path id="bjArc3" d="M96 281 Q180 252 264 281"/></defs>'
+      + '<path d="M2 118 Q2 104 16 104 L344 104 Q358 104 358 118 L358 292 A178 178 0 0 1 2 292 Z" fill="url(#bjRail)" stroke="#6b4a2c" stroke-width="1"/>'
+      + '<path d="M2 118 Q2 104 16 104 L344 104 Q358 104 358 118 L358 292 A178 178 0 0 1 2 292 Z" fill="none" stroke="#ffffff22" stroke-width="1" stroke-dasharray="2 4" transform="translate(0 0)"/>'
+      + '<path d="M13 124 Q13 116 21 116 L339 116 Q347 116 347 124 L347 292 A167 167 0 0 1 13 292 Z" fill="url(#bjFelt)"/>'
+      + '<path d="M13 124 Q13 116 21 116 L339 116 Q347 116 347 124 L347 292 A167 167 0 0 1 13 292 Z" filter="url(#bjNoise)" opacity=".9"/>'
+      + '<path d="M13 124 Q13 116 21 116 L339 116 Q347 116 347 124 L347 292 A167 167 0 0 1 13 292 Z" fill="none" stroke="#e0c06a" stroke-opacity=".55" stroke-width="1.2"/>'
+      + '<text font-family="Georgia, serif" font-size="11" font-weight="700" letter-spacing="2" fill="#f1d889" fill-opacity=".85" text-anchor="middle"><textPath href="#bjArc1" startOffset="50%">BLACKJACK PAYS 3 TO 2</textPath></text>'
+      + '<text font-family="Georgia, serif" font-size="7.5" letter-spacing="1.6" fill="#f1d889" fill-opacity=".65" text-anchor="middle"><textPath href="#bjArc2" startOffset="50%">DEALER MUST STAND ON ALL 17s</textPath></text>'
+      + '<text font-family="Georgia, serif" font-size="7" letter-spacing="1.6" fill="#f1d889" fill-opacity=".55" text-anchor="middle"><textPath href="#bjArc3" startOffset="50%">INSURANCE PAYS 2 TO 1</textPath></text>'
+      + '<ellipse cx="180" cy="300" rx="34" ry="12" fill="none" stroke="#f1d889" stroke-opacity=".12" stroke-width="1"/>';
+    stage.appendChild(svg);
+    var lamp = el('div', 'bj-lamp'); stage.appendChild(lamp);
+    [[12, 24, 0], [30, 8, 9], [58, 30, 17], [76, 14, 4], [88, 40, 25], [44, 52, 13]].forEach(function (m) { var d = el('div', 'bj-mote'); d.style.left = m[0] + '%'; d.style.top = (m[1] + 12) + '%'; d.style.animationDelay = '-' + m[2] + 's'; stage.appendChild(d); });
+  }
   function renderDealer(box) {
     var t = Core.state, D = t.deal || { phase: 'betting', cards: [], hole: false, deadline: 0 }, me = mySeat();
     box.hidden = false; box.innerHTML = '';
     var title = D.phase === 'betting' ? 'Place your wagers' : D.phase === 'insurance' ? 'Insurance?' : D.phase === 'acting' ? 'Play your hands' : 'Round over';
-    var until = D.phase === 'acting' ? (me && me.until ? me.until : 0) : D.deadline;
     var bar = el('div', 'rbar'), left = el('div');
     left.appendChild(el('div', 'big', 'Round ' + t.round.n + ' · ' + title));
     left.appendChild(el('div', 'sub2', 'Online dealer · stands on all 17 · blackjack pays 3:2 · split once · the table closes after 5 minutes with nobody playing'));
@@ -2573,38 +2688,71 @@ var Core = (function () {
     left.appendChild(el('div', 'sub2', (casinoPot === null ? '' : 'Casino pot ' + Core.fmt(casinoPot) + ' · ') + 'Max bet ' + Core.fmt(t.maxBet || 0) + ' · $5 minimum · up to 25% of your chips per hand'));
     bar.appendChild(left);
     box.appendChild(bar);
-    var dz = el('div', 'dealerbox');
-    dz.appendChild(el('div', 'sub', 'Dealer' + (D.cards.length && !D.hole ? ' · ' + handTot(D.cards).total + (D.dealerBJ ? ' blackjack' : '') : '')));
+    /* the room and the felt table */
+    var stage = el('div', 'bjstage'); stage.id = 'bjStage'; bjLamp(stage);
+    var dn = BJ_DEALERS[bjHash(online.code || 'T') % BJ_DEALERS.length];
+    var dl = el('div', 'bj-dealer');
+    var said = !t.players.length ? 'Waiting for players to take a seat.' : D.phase === 'betting' ? (D.dealAt && secsLeft(D.dealAt) <= 2 ? 'Cards in the air!' : 'Place your bets.') : D.phase === 'insurance' ? 'Insurance?' : D.phase === 'acting' ? (D.cards.length ? 'Dealer shows ' + (cVal(D.cards[0]) === 11 ? 'an ace' : cVal(D.cards[0])) + '.' : '') : (D.cards.length ? (D.dealerBJ ? 'Dealer has blackjack.' : 'Dealer has ' + handTot(D.cards).total + '.') : '');
+    if (said && t.players.length) dl.appendChild(el('div', 'bj-bubble', said));
+    dl.appendChild(el('div', 'bust', '🤵')); dl.appendChild(el('div', 'dname', dn));
     var cs = el('div', 'dkcards');
     D.cards.forEach(function (c) { cs.appendChild(cardEl(c)); });
     if (D.hole) cs.appendChild(cardEl(0, true));
-    if (!D.cards.length && !D.hole) cs.appendChild(el('div', 'sub', t.players.length ? 'The cards are dealt 5 seconds after every seated player has bet (or sat out).' : 'Waiting for players to take a seat.'));
-    dz.appendChild(cs); box.appendChild(dz);
-    t.players.forEach(function (p) {
-      var mineSeat = !!myRef && p.owner === myRef, row = el('div', 'dseat' + (mineSeat ? ' me' : ''));
-      var dn = el('div', 'dn'); dn.appendChild(el('span', null, p.name + (mineSeat ? ' (you)' : '')));
-      dn.appendChild(el('span', null, p.hands.length ? Core.fmt(p.balance) : p.out ? 'sitting out' : p.bet > 0 ? 'wager ' + Core.fmt(p.bet) : D.phase === 'betting' ? 'no wager yet' : 'next round'));
-      row.appendChild(dn);
-      p.hands.forEach(function (h) {
-        var cs2 = el('div', 'dkcards'); h.cards.forEach(function (c) { cs2.appendChild(cardEl(c)); }); row.appendChild(cs2);
-        var tt = handTot(h.cards), info = el('div', 'sub');
-        info.appendChild(document.createTextNode((tt.soft && tt.total < 21 ? 'soft ' : '') + tt.total + ' · bet ' + Core.fmt(h.bet) + (h.doubled ? ' (doubled)' : '')));
-        if (h.res) info.appendChild(el('span', 'chip-res ' + h.res, (LBL[h.res] || h.res) + (h.net ? ' ' + (h.net > 0 ? '+' : '-') + Core.fmt(Math.abs(h.net)) : '')));
-        row.appendChild(info);
+    dl.appendChild(cs);
+    if (D.cards.length && !D.hole) dl.appendChild(el('div', 'bj-total', handTot(D.cards).total + (D.dealerBJ ? ' · blackjack' : '')));
+    stage.appendChild(dl);
+    if (!t.players.length) stage.appendChild(el('div', 'bj-wait', 'Waiting for players to take a seat.'));
+    var shoe = el('div', 'bj-shoe'); stage.appendChild(shoe);
+    var tray = el('div', 'bj-tray'); var ti = document.createElement('i'); ti.style.height = Math.min(70, 8 + (t.round.n - 1) * 6) + '%'; tray.appendChild(ti); stage.appendChild(tray);
+    var rack = el('div', 'bj-rack'); BJ_DENOMS.slice().reverse().forEach(function (d) { var st = el('div', 'bst'); for (var k = 0; k < 3; k++) { var c = document.createElement('i'); c.style.background = d[1]; c.style.bottom = (k * 3.2) + 'px'; st.appendChild(c); } rack.appendChild(st); }); stage.appendChild(rack);
+    /* seats along the curved edge */
+    var N = Math.max(7, t.players.length + (t.players.length % 2 ? 0 : 1)), cIdx = (N - 1) / 2, slots = [], others = [], actingId = 0;
+    t.players.forEach(function (q) { if (myRef && q.owner === myRef) slots[cIdx] = q; else others.push(q); });
+    for (var si = 0, oj = 0; si < N; si++) { if (!slots[si] && !(myRef && si === cIdx && slots[cIdx])) slots[si] = others[oj++] || null; }
+    if (D.phase === 'acting') t.players.some(function (p) { return p.hands.some(function (h) { if (!h.done) { actingId = p.id; return true; } return false; }); });
+    for (var i = 0; i < N; i++) {
+      var p = slots[i] || null, pos = bjSeatPos(i, N), mineSeat = !!(p && myRef && p.owner === myRef);
+      var seat = el('div', 'bj-seat' + (p ? '' : ' empty') + (mineSeat ? ' me' : '') + (p && p.id === actingId ? ' turn' : '') + (p && p.out ? ' out' : ''));
+      seat.style.left = pos.x + '%'; seat.style.top = pos.y + '%';
+      if (p) seat.setAttribute('data-seat', String(p.id));
+      if (p) p.hands.forEach(function (h, hi) {
+        var hw = el('div', 'hand2'), c2 = el('div', 'dkcards'); h.cards.forEach(function (c) { c2.appendChild(cardEl(c)); }); hw.appendChild(c2);
+        var tt = handTot(h.cards); hw.appendChild(el('div', 'bj-total', (tt.soft && tt.total < 21 ? 'soft ' : '') + tt.total + (h.doubled ? ' · x2' : '')));
+        if (h.res) { hw.appendChild(document.createElement('br')); hw.appendChild(el('span', 'chip-res ' + h.res, (LBL[h.res] || h.res) + (h.net ? ' ' + (h.net > 0 ? '+' : '-') + Core.fmt(Math.abs(h.net)) : ''))); }
+        seat.appendChild(hw);
       });
+      var ring = el('div', 'bj-ring'), wager = p ? (p.hands.length ? p.hands.reduce(function (a, h) { return a + h.bet; }, 0) : p.bet) : 0;
+      if (wager > 0) { ring.appendChild(bjStack(wager, 6)); ring.appendChild(el('div', 'bet', Core.fmt(wager).replace(/\.00$/, ''))); }
+      seat.appendChild(ring);
+      var pl = el('div', 'bj-plate');
+      if (p) {
+        var av = el('span', 'av', (p.name || '?').charAt(0).toUpperCase()); av.style.background = bjColor(p.name); pl.appendChild(av);
+        pl.appendChild(el('span', 'nm', p.name + (mineSeat ? ' (you)' : '')));
+        pl.appendChild(el('span', 'bal', Core.fmt(p.balance).replace(/\.00$/, '') + (p.out ? ' · out' : '')));
+      } else pl.appendChild(el('span', 'nm', '+ Sit here'));
+      seat.appendChild(pl);
+      stage.appendChild(seat);
+    }
+    stage.appendChild(el('div', 'bj-plaque', 'Table ' + (online.code || '')));
+    box.appendChild(stage);
+    /* the controls for my own seat (step 15b moves these into a bottom-right panel) */
+    var ctl = el('div', 'bjctl'); box.appendChild(ctl);
+    t.players.forEach(function (p) {
+      var mineSeat = !!myRef && p.owner === myRef; if (!mineSeat) return;
+      var row = el('div', 'dseat me');
       if (p.ins > 0) row.appendChild(el('div', 'sub', 'Insurance ' + Core.fmt(p.ins)));
-      if (mineSeat && D.phase === 'results') {
+      if (D.phase === 'results') {
         var nb = el('button', 'btn-add', 'Next round'); nb.type = 'button'; nb.setAttribute('data-d', 'next'); nb.setAttribute('data-pid', p.id);
         var nbar = el('div', 'actbar'); nbar.appendChild(nb); row.appendChild(nbar);
       }
-      if (mineSeat && D.phase === 'insurance' && p.hands.length && !p.insDone) {
+      if (D.phase === 'insurance' && p.hands.length && !p.insDone) {
         var side = Math.floor(p.hands[0].bet / 2), ab = el('div', 'actbar');
         [['1', 'Insure ' + Core.fmt(side), 'btn-add'], ['0', 'No thanks', 'btn-ghost']].forEach(function (o) {
           var b = el('button', o[2], o[1]); b.type = 'button'; b.setAttribute('data-d', 'insure'); b.setAttribute('data-take', o[0]); b.setAttribute('data-pid', p.id); ab.appendChild(b);
         });
         row.appendChild(el('div', 'sub', 'The dealer shows an ace. Insurance pays 2:1 if the dealer has blackjack.')); row.appendChild(ab);
       }
-      if (mineSeat && D.phase === 'acting') {
+      if (D.phase === 'acting') {
         var cur = null; p.hands.forEach(function (h) { if (!cur && !h.done) cur = h; });
         if (cur) {
           var free = p.balance - p.hand, two = cur.cards.length === 2;
@@ -2621,7 +2769,7 @@ var Core = (function () {
           row.appendChild(ab2);
         }
       }
-      box.appendChild(row);
+      if (row.childNodes.length) ctl.appendChild(row);
     });
     var rm = el('div', 'msg'); rm.id = 'dealMsg'; rm.setAttribute('role', 'status'); box.appendChild(rm);
   }
