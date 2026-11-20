@@ -1179,6 +1179,10 @@ export default {
         if (!/^[^\s@<>]+@[^\s@<>]+$/.test(email) || email.length > 120) return json({ error: 'bad email' }, 400);
         return withCors(await reg(env, '/preapprove', { email }));
       }
+      if (url.pathname === '/api/admin/casino/mint' && request.method === 'POST') {
+        const b = await readJson(request);
+        return withCors(await reg(env, '/casino/mint', { amount: b.amount, note: String(b.note || '').slice(0, 60) }));
+      }
       if (url.pathname === '/api/admin/mint' && request.method === 'POST') {
         const b = await readJson(request);
         return withCors(await reg(env, '/bank/mint', { ref: String(b.ref || ''), amount: b.amount, note: String(b.note || '').slice(0, 60) }));
@@ -1596,6 +1600,15 @@ export class Registry {
       if (!REF_RE.test(String(b.ref || ''))) return json({ error: 'bad request' }, 400);
       const bal = await ensureGrant(s, b.ref);
       return json({ balance: bal, granted: true, ledger: ((await s.get('l:' + b.ref)) || []).slice().reverse() });
+    }
+    if (path === '/casino/mint') {
+      if (!Number.isInteger(b.amount) || b.amount <= 0 || b.amount > 100000000) return json({ error: 'bad request' }, 400);
+      const c = await getCasino(s);
+      c.pot += b.amount;
+      const ledger = (await s.get('casino:mint-ledger')) || [];
+      ledger.push({ t: Date.now(), amount: b.amount, balance: c.pot, epoch: c.epoch, note: b.note || 'Admin mint' });
+      await s.put({ casino: c, supply: ((await s.get('supply')) || 0) + b.amount, 'casino:mint-ledger': ledger.slice(-LEDGER_MAX) });
+      return json({ ok: true, balance: c.pot });
     }
     if (path === '/bank/mint') {                     // admin only (checked by the worker): new money, always logged
       if (!REF_RE.test(String(b.ref || '')) || !Number.isInteger(b.amount) || b.amount <= 0 || b.amount > 100000000) return json({ error: 'bad request' }, 400);

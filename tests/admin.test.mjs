@@ -1,6 +1,6 @@
 import W, {Registry as R} from './w.mjs';
 import assert from 'node:assert';
-const store=new Map(); const st={storage:{get:async k=>store.get(k),put:async(k,v)=>void store.set(k,v),delete:async k=>void store.delete(k),list:async({prefix})=>new Map([...store].filter(([k])=>k.startsWith(prefix)))}};
+const store=new Map(); const st={storage:{get:async k=>store.get(k),put:async(k,v)=>{for(const [key,value] of Object.entries(typeof k==='string'?{[k]:v}:k))store.set(key,value)},delete:async k=>void store.delete(k),list:async({prefix})=>new Map([...store].filter(([k])=>k.startsWith(prefix)))}};
 const reg=new R(st);
 const env={ADMIN_KEY:'secretkey',ADMIN_EMAILS:'Boss@Gmail.com, other@x.com',REGISTRY:{idFromName:()=>1,get:()=>({fetch:(u,o)=>reg.fetch(new Request(u,o))})}};
 const call=(path,{method='GET',dev,key,body}={})=>W.fetch(new Request('https://w'+path,{method,headers:{...(dev?{'X-Device-Id':dev}:{}),...(key?{'X-Admin-Key':key}:{}),'Content-Type':'application/json'},body:body?JSON.stringify(body):undefined}),env).then(async r=>({s:r.status,j:await r.json()}));
@@ -28,3 +28,10 @@ ok((await call('/api/admin/devices',{key:'wrong'})).s===401,'wrong key refused')
 await call('/api/admin/self',{method:'POST',key:'secretkey',body:{deviceId:D('d')}});
 ok((await call('/api/access/status',{dev:D('d')})).j.status==='approved','owner device approved with the key still works');
 console.log('ALL',n,'ADMIN CHECKS PASSED');
+
+const potMint = '/api/admin/casino/mint';
+ok((await call(potMint,{method:'POST',dev:D('b'),body:{amount:125}})).s===401,'players cannot fund the casino');
+ok((await call(potMint,{method:'POST',dev:D('c'),body:{amount:1.5}})).s===400,'fractional cents are rejected');
+const minted = await call(potMint,{method:'POST',dev:D('c'),body:{amount:125,note:'Top-up'}});
+ok(minted.s===200 && minted.j.balance===10000125 && store.get('supply')===10000125,'casino top-up increases pot and supply');
+ok(store.get('casino:mint-ledger')[0].note==='Top-up','casino top-up is logged');

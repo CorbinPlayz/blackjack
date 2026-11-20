@@ -41,6 +41,9 @@
     outline: none; -webkit-appearance: none; appearance: none;
   }
   input[type="text"]:focus, input[type="password"]:focus { border-color: var(--green); }
+  #adminFunds select { width: 100%; background: var(--bg); color: var(--text); border: 1px solid var(--line); border-radius: 12px; padding: 14px 12px; font: inherit; }
+  #adminFunds label { display: block; margin: 10px 0 4px; }
+  #adminFundSubmit { width: 100%; margin-top: 10px; }
   input::placeholder { color: #55645b; }
   button {
     font: inherit; font-weight: 700; border: 0; border-radius: 12px; padding: 14px 12px;
@@ -667,6 +670,19 @@
   <div id="adminList"></div>
   <div class="msg" id="adminMsg" role="status"></div>
 </div>
+
+<form class="panel" id="adminFunds" hidden>
+  <h2>Admin · add funds</h2>
+  <div class="online-status">Adds game money to a player bank account or the shared casino pot. A pot top-up does not lift an active casino lockout.</div>
+  <label for="adminFundTarget">Destination</label>
+  <select id="adminFundTarget"></select>
+  <label for="adminFundAmount">Amount ($)</label>
+  <input type="text" id="adminFundAmount" inputmode="decimal" placeholder="0.00" required>
+  <label for="adminFundNote">Ledger note (optional)</label>
+  <input type="text" id="adminFundNote" maxlength="60">
+  <button class="btn-add" type="submit" id="adminFundSubmit">Add funds</button>
+  <div class="msg" id="adminFundMsg" role="status"></div>
+</form>
 
 </section>
 </main>
@@ -3882,12 +3898,19 @@ var Core = (function () {
 
   async function adminLoad() {
     var key = adminKeyVal();
-    if (!key && !isAdminAcct) { $('adminKeyBox').hidden = false; $('adminList').innerHTML = ''; return; }
+    if (!key && !isAdminAcct) { $('adminFunds').hidden = true; $('adminKeyBox').hidden = false; $('adminList').innerHTML = ''; return; }
     try {
       var r = await api('/api/admin/devices', { headers: adminHdr() });
-      if (r.status === 401) { if (key) lsDel(ADMIN_STORE); $('adminKeyBox').hidden = false; adminMsg(key ? 'That admin key is no longer valid.' : 'This Google account is not an admin.'); return; }
+      if (r.status === 401) { $('adminFunds').hidden = true; if (key) lsDel(ADMIN_STORE); $('adminKeyBox').hidden = false; adminMsg(key ? 'That admin key is no longer valid.' : 'This Google account is not an admin.'); return; }
       if (!r.ok) throw new Error('status ' + r.status);
       var devices = (await r.json()).devices || [];
+      var target = $('adminFundTarget'), selected = target.value;
+      target.replaceChildren(new Option('Casino pot', 'casino'));
+      devices.filter(function (d) { return d.status === 'approved'; }).forEach(function (d) {
+        target.add(new Option(d.name + (d.email ? ' · ' + d.email : ''), d.ref));
+      });
+      target.value = Array.from(target.options).some(function (o) { return o.value === selected; }) ? selected : '';
+      $('adminFunds').hidden = false;
       var waiting = devices.filter(function (d) { return d.status === 'pending'; }).length;
       $('adminBtn').textContent = waiting ? 'Admin (' + waiting + ' waiting)' : 'Admin';
       $('navBadge').textContent = waiting ? String(waiting) : '';
@@ -3906,6 +3929,32 @@ var Core = (function () {
       adminMsg('Could not reach the server.');
     }
   }
+
+  $('adminFunds').addEventListener('submit', async function (e) {
+    e.preventDefault();
+    var target = $('adminFundTarget'), ref = target.value, raw = $('adminFundAmount').value.trim();
+    var msg = $('adminFundMsg'), btn = $('adminFundSubmit');
+    if (btn.disabled) return;
+    if (!ref) { msg.textContent = 'Choose a destination.'; return; }
+    var amount = Math.round(Number(raw) * 100);
+    if (!/^\d+(?:\.\d{1,2})?$/.test(raw) || amount <= 0 || amount > 100000000) {
+      msg.textContent = 'Enter an amount from $0.01 to $1,000,000.'; return;
+    }
+    var label = target.options[target.selectedIndex].text;
+    if (!window.confirm('Add ' + Core.fmt(amount) + ' to ' + label + '?')) return;
+    btn.disabled = true;
+    try {
+      var r = await api(ref === 'casino' ? '/api/admin/casino/mint' : '/api/admin/mint', {
+        method: 'POST', headers: Object.assign({ 'Content-Type': 'application/json' }, adminHdr()),
+        body: JSON.stringify({ ref: ref, amount: amount, note: $('adminFundNote').value.trim() })
+      });
+      if (!r.ok) { msg.textContent = 'Funds were not added (status ' + r.status + ').'; return; }
+      msg.textContent = 'Added ' + Core.fmt(amount) + ' to ' + label + '.';
+      $('adminFundAmount').value = ''; $('adminFundNote').value = '';
+    } catch (err) {
+      msg.textContent = 'Could not confirm the change. Check the balance before retrying.';
+    } finally { btn.disabled = false; }
+  });
 
   async function adminAct(ref, act) {
     try {
